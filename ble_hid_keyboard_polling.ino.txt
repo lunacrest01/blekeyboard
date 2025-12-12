@@ -1,0 +1,181 @@
+// ble_hid_keyboard_bonding_simple.ino
+// ESP32-C3 BLE HID keyboard (NimBLE-Arduino) with bonding enabled.
+// Avoids custom NimBLESecurityCallbacks to maximize compatibility.
+
+#include <NimBLEDevice.h>
+#include <NimBLEHIDDevice.h>
+
+#define BUTTON_PIN       0       // change to your pin if needed
+#define DEBOUNCE_MS      50
+#define HID_READY_DELAY  1500    // ms after connect before allowing HID sends
+#define ADV_RESTART_MS   300     // ms after disconnect before re-advertise
+
+// Globals
+NimBLEServer* pServer = nullptr;
+NimBLEHIDDevice* hid = nullptr;
+NimBLECharacteristic* inputReport = nullptr;
+NimBLEAdvertising* pAdvertising = nullptr;
+
+volatile bool button_flag = false;
+unsigned long lastDebounce = 0;
+unsigned long connectTs = 0;
+bool hidReady = false;
+int lastConnectedCount = 0;
+
+// Minimal keyboard report descriptor (report ID 1)
+static const uint8_t keyboardReportDescriptor[] = {
+  0x05,0x01,        // Usage Page (Generic Desktop)
+  0x09,0x06,        // Usage (Keyboard)
+  0xA1,0x01,        // Collection (Application)
+  0x85,0x01,        //   Report ID (1)
+  // Modifiers
+  0x05,0x07,0x19,0xE0,0x29,0xE7,
+  0x15,0x00,0x25,0x01,0x75,0x01,0x95,0x08,0x81,0x02,
+  // Reserved
+  0x95,0x01,0x75,0x08,0x81,0x01,
+  // Key array (6)
+  0x95,0x06,0x75,0x08,0x15,0x00,0x25,0x65,
+  0x05,0x07,0x19,0x00,0x29,0x65,0x81,0x00,
+  0xC0
+};
+
+// HID keyboard report: [Report ID, Modifier, Reserved, Key1-6]
+uint8_t keyReport[9] = {0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+
+void IRAM_ATTR onButtonISR() { button_flag = true; }
+
+// Send a HID key (first key slot)
+void sendHIDKey(uint8_t hidUsage) {
+  int connected = pServer ? pServer->getConnectedCount() : 0;
+  Serial.printf("[HID] send request (connected=%d, hidReady=%d)\n", connected, hidReady);
+
+  if (connected == 0) {
+    Serial.println("[HID] no connected peer -> skip");
+    return;
+  }
+  if (!hidReady) {
+    Serial.println("[HID] HID not ready -> skip");
+    return;
+  }
+
+  // Press
+  memset(keyReport, 0, sizeof(keyReport));
+  keyReport[2] = hidUsage; // first key slot
+  inputReport->setValue(keyReport, sizeof(keyReport));
+  inputReport->notify();
+
+  delay(10);
+
+  // Release
+  memset(keyReport, 0, sizeof(keyReport));
+  inputReport->setValue(keyReport, sizeof(keyReport));
+  inputReport->notify();
+
+  Serial.println("[HID] key sent");
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(50);
+  Serial.println("\n=== BLE HID keyboard (bonding simple) ===");
+
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), onButtonISR, FALLING);
+
+  // Initialize NimBLE
+  NimBLEDevice::init("ESP32-Macropad");
+  NimBLEDevice::setPower(ESP_PWR_LVL_P9);
+
+  // Enable bonding/persistent pairing:
+  // setSecurityAuth(bonding, mitm, sc)
+  // bonding = true  -> store bonds
+  // mitm    = false -> no passkey required
+  // sc      = true  -> prefer secure connections when available
+  NimBLEDevice::setSecurityAuth(true, false, true);
+
+  // Create server
+  pServer = NimBLEDevice::createServer();
+
+  // Create HID device helper
+  hid = new NimBLEHIDDevice(pServer);
+
+  // Device info - common API calls. If compilation fails on these,
+  // your NimBLE fork likely uses alternate method names; paste the error.
+  hid->setManufacturer("Maker");
+  hid->setPnp(0x02, 0x1234, 0x5678, 0x0101);
+  hid->setHidInfo(0x00, 0x01);
+
+  // Attach report map and get input report (report id 1)
+  hid->setReportMap((uint8_t*)keyboardReportDescriptor, sizeof(keyboardReportDescriptor));
+  inputReport = hid->getInputReport(1);
+
+  // Start HID services
+  hid->startServices();
+
+  // Advertising
+  pAdvertising = NimBLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(hid->getHidService()->getUUID());
+  pAdvertising->setAppearance(0x03C1); // keyboard
+  pAdvertising->start();
+
+  Serial.println("[BLE] Advertising started as 'ESP32-Macropad'");
+  Serial.println("[BLE] Pair the device from OS Bluetooth settings (create a bond).");
+}
+
+void loop() {
+  // Poll connected count and track transitions
+  int connected = pServer ? pServer->getConnectedCount() : 0;
+  static int prevConnected = -1;
+  if (connected != prevConnected) {
+    Serial.printf("[BLE] connectedCount changed: %d -> %d\n", prevConnected, connected);
+    prevConnected = connected;
+    if (connected > 0) {
+      connectTs = millis();
+      hidReady = false;
+      // stop advertising to signal established connection
+      if (pAdvertising && pAdvertising->isAdvertising()) {
+        pAdvertising->stop();
+        Serial.println("[BLE] Advertising stopped (connected).");
+      }
+    } else {
+      // schedule advertising restart after small delay (handled below)
+      Serial.println("[BLE] No peers connected");
+    }
+  }
+
+  // After small delay post-connect mark HID ready
+  if (connected > 0 && !hidReady && connectTs != 0 && (millis() - connectTs) >= HID_READY_DELAY) {
+    hidReady = true;
+    Serial.println("[HID] HID ready - will send notifications now");
+  }
+
+  // Restart advertising after disconnect (avoid flapping)
+  static unsigned long lastDiscTs = 0;
+  if (connected == 0) {
+    if (lastDiscTs == 0) lastDiscTs = millis();
+    if ((millis() - lastDiscTs) > ADV_RESTART_MS) {
+      if (pAdvertising && !pAdvertising->isAdvertising()) {
+        Serial.println("[BLE] Restarting advertising...");
+        pAdvertising->start();
+      }
+      lastDiscTs = 0;
+    }
+  } else {
+    lastDiscTs = 0;
+  }
+
+  // Button debounce & send
+  if (button_flag) {
+    unsigned long now = millis();
+    if (now - lastDebounce >= DEBOUNCE_MS) {
+      lastDebounce = now;
+      if (digitalRead(BUTTON_PIN) == LOW) {
+        Serial.println("[BUTTON] pressed -> attempt send 'a'");
+        sendHIDKey(0x04); // HID usage 0x04 = 'a'
+      }
+    }
+    button_flag = false;
+  }
+
+  delay(10);
+}
