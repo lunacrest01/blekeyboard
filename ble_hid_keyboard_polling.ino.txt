@@ -1,157 +1,467 @@
-#include <NimBLEDevice.h>
-#include <NimBLEHIDDevice.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_ST7735.h>
+#include <SPI.h>
+#include "image.h"
 
-#define BUTTON_PIN       0       
-#define DEBOUNCE_MS      50
-#define HID_READY_DELAY  1500    
-#define ADV_RESTART_MS   300     
+// ================== CONFIG ==================
+#define TFT_CS     10
+#define TFT_RST     4
+#define TFT_DC      3
+#define TFT_SCLK    6
+#define TFT_MOSI    7
+#define BUTTON_PIN  0
 
-// Globals
-NimBLEServer* pServer = nullptr;
-NimBLEHIDDevice* hid = nullptr;
-NimBLECharacteristic* inputReport = nullptr;
-NimBLEAdvertising* pAdvertising = nullptr;
+#define SCREEN_W 128
+#define SCREEN_H 160
+#define PASS_LENGTH 4
+#define TIMEOUT_MS 5000
+#define DEBOUNCE   60
 
-volatile bool button_flag = false;
-unsigned long lastDebounce = 0;
-unsigned long connectTs = 0;
-bool hidReady = false;
-int lastConnectedCount = 0;
+// Light Theme Colors
+#define LIGHT_BG 0xFFFF        // Pure white
+#define SOFT_GRAY 0xE73C       // Light gray
+#define MID_GRAY 0xBDF7        // Medium gray
+#define DARK_TEXT 0x4208       // Dark gray text
+#define ACCENT_BLUE 0x3C9F     // Soft blue
+#define BRIGHT_BLUE 0x051D     // Bright blue
+#define SUCCESS_GREEN 0x07E8   // Soft green
+#define SHADOW_LIGHT 0xD6BA    // Very light shadow
+#define BORDER_LIGHT 0xCE59    // Light border
 
-static const uint8_t keyboardReportDescriptor[] = {
-  0x05,0x01,       
-  0x09,0x06,        
-  0xA1,0x01,     
-  0x85,0x01,    
-  // Modifiers
-  0x05,0x07,0x19,0xE0,0x29,0xE7,
-  0x15,0x00,0x25,0x01,0x75,0x01,0x95,0x08,0x81,0x02,
-  // Reserved
-  0x95,0x01,0x75,0x08,0x81,0x01,
-  // Key array (6)
-  0x95,0x06,0x75,0x08,0x15,0x00,0x25,0x65,
-  0x05,0x07,0x19,0x00,0x29,0x65,0x81,0x00,
-  0xC0
-};
+Adafruit_ST7735 tft(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
 
-// HID keyboard report: [Report ID, Modifier, Reserved, Key1-6]
-uint8_t keyReport[9] = {0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+// ================== STATE ==================
+enum State { BOOTING, LOCKED, UNLOCKING, MENU };
+State currentState = BOOTING;
 
-void IRAM_ATTR onButtonISR() { button_flag = true; }
+uint8_t passIndex = 0;
+unsigned long lastPressTime = 0;
+bool lastButton = HIGH;
 
-// Send a HID key (first key slot)
-void sendHIDKey(uint8_t hidUsage) {
-  int connected = pServer ? pServer->getConnectedCount() : 0;
-  Serial.printf("[HID] send request (connected=%d, hidReady=%d)\n", connected, hidReady);
-
-  if (connected == 0) {
-    Serial.println("[HID] no connected peer -> skip");
-    return;
-  }
-  if (!hidReady) {
-    Serial.println("[HID] HID not ready -> skip");
-    return;
-  }
-
-  // Press
-  memset(keyReport, 0, sizeof(keyReport));
-  keyReport[2] = hidUsage; 
-  inputReport->setValue(keyReport, sizeof(keyReport));
-  inputReport->notify();
-
-  delay(10);
-
-  memset(keyReport, 0, sizeof(keyReport));
-  inputReport->setValue(keyReport, sizeof(keyReport));
-  inputReport->notify();
-
-  Serial.println("[HID] key sent");
-}
-
+// ======================================================
+// SETUP
+// ======================================================
 void setup() {
-  Serial.begin(115200);
-  delay(50);
-  Serial.println("BLE HID keyboard (bonding simple)");
-
+  SPI.begin();
+  SPI.setFrequency(80000000);
   pinMode(BUTTON_PIN, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), onButtonISR, FALLING);
 
-  NimBLEDevice::init("ESP32-C3");
-  NimBLEDevice::setPower(ESP_PWR_LVL_P9);
+  tft.initR(INITR_BLACKTAB);
+  tft.setRotation(0);
 
-  NimBLEDevice::setSecurityAuth(true, false, true);
+  showBootLogo();
+  delay(800);
 
-  pServer = NimBLEDevice::createServer();
-
-  hid = new NimBLEHIDDevice(pServer);
-
-  hid->setManufacturer("Maker");
-  hid->setPnp(0x02, 0x1234, 0x5678, 0x0101);
-  hid->setHidInfo(0x00, 0x01);
-
-  hid->setReportMap((uint8_t*)keyboardReportDescriptor, sizeof(keyboardReportDescriptor));
-  inputReport = hid->getInputReport(1);
-
-  hid->startServices();
-
-  // Advertising
-  pAdvertising = NimBLEDevice::getAdvertising();
-  pAdvertising->addServiceUUID(hid->getHidService()->getUUID());
-  pAdvertising->setAppearance(0x03C1); // keyboard
-  pAdvertising->start();
-
-  Serial.println("[BLE] Advertising started as 'ESP32-C3'");
-  Serial.println("[BLE] Pair the device from OS Bluetooth settings");
+  drawLockScreen(); 
+  currentState = LOCKED;
 }
 
+// ======================================================
+// MAIN LOOP
+// ======================================================
 void loop() {
-  int connected = pServer ? pServer->getConnectedCount() : 0;
-  static int prevConnected = -1;
-  if (connected != prevConnected) {
-    Serial.printf("[BLE] connectedCount changed: %d -> %d\n", prevConnected, connected);
-    prevConnected = connected;
-    if (connected > 0) {
-      connectTs = millis();
-      hidReady = false;
-      if (pAdvertising && pAdvertising->isAdvertising()) {
-        pAdvertising->stop();
-        Serial.println("[BLE] Advertising stopped (connected).");
+  handleButton();
+
+  if (currentState == LOCKED && millis() - lastPressTime > TIMEOUT_MS && passIndex > 0) {
+    passIndex = 0;
+    quickRedrawCircles();
+  }
+}
+
+// ======================================================
+// BOOT LOGO
+// ======================================================
+void showBootLogo() {
+  tft.startWrite();
+  tft.setAddrWindow(0, 0, SCREEN_W, SCREEN_H);
+  for (int i = 0; i < SCREEN_W * SCREEN_H; i++) {
+    tft.pushColor(unnamed_1_1_[i]);
+  }
+  tft.endWrite();
+}
+
+// ======================================================
+// RGB565 HELPER
+// ======================================================
+uint16_t RGB565(uint8_t r, uint8_t g, uint8_t b) {
+  return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+}
+
+// ======================================================
+// LIGHT THEME LOCK SCREEN
+// ======================================================
+void drawLockScreen() {
+  // Soft gradient background (light to lighter)
+  for (int y = 0; y < SCREEN_H; y++) {
+    uint8_t brightness = map(y, 0, SCREEN_H, 245, 255);
+    tft.drawFastHLine(0, y, SCREEN_W, RGB565(brightness - 5, brightness - 2, brightness));
+  }
+
+  // Subtle decorative elements
+  drawLightDecorativeElements();
+
+  // Modern lock icon - moved higher since we removed time
+  drawModernLightLockIcon(64, 45);
+
+  // Status text - adjusted position
+  drawLightLockedIndicator();
+
+  // Modern passcode area
+  drawLightPasscodeArea();
+}
+
+// ======================================================
+// DECORATIVE ELEMENTS FOR LIGHT THEME
+// ======================================================
+void drawLightDecorativeElements() {
+  // Soft circular patterns in corners
+  uint16_t decorColor = RGB565(230, 240, 250);
+  
+  // Top left pattern
+  tft.drawCircle(15, 15, 20, decorColor);
+  tft.drawCircle(15, 15, 22, decorColor);
+  
+  // Top right pattern
+  tft.drawCircle(113, 15, 20, decorColor);
+  tft.drawCircle(113, 15, 22, decorColor);
+  
+  // Subtle dots pattern
+  for (int y = 10; y < SCREEN_H - 10; y += 12) {
+    for (int x = 10; x < SCREEN_W - 10; x += 12) {
+      if ((x + y) % 24 == 0) {
+        tft.fillCircle(x, y, 1, RGB565(220, 230, 240));
       }
+    }
+  }
+}
+
+// ======================================================
+// MODERN LIGHT LOCK ICON
+// ======================================================
+void drawModernLightLockIcon(int centerX, int centerY) {
+  // Soft shadow effect
+  tft.fillCircle(centerX + 2, centerY + 2, 24, RGB565(220, 230, 235));
+  
+  // Outer glow ring
+  for (int r = 23; r > 19; r--) {
+    uint8_t alpha = map(r, 19, 23, 255, 200);
+    tft.drawCircle(centerX, centerY, r, RGB565(180, 200, alpha));
+  }
+  
+  // Lock body - gradient effect
+  for (int i = 0; i < 24; i++) {
+    uint8_t brightness = 245 - (i);
+    tft.drawFastVLine(centerX - 11 + i, centerY - 6, 24, 
+                     RGB565(brightness - 10, brightness - 5, brightness));
+  }
+  
+  // Body border
+  tft.drawRoundRect(centerX - 12, centerY - 7, 24, 26, 4, DARK_TEXT);
+  tft.drawRoundRect(centerX - 11, centerY - 6, 22, 24, 4, MID_GRAY);
+  
+  // Lock shackle
+  // Outer shackle
+  tft.drawCircle(centerX, centerY - 10, 10, DARK_TEXT);
+  tft.drawCircle(centerX, centerY - 10, 9, MID_GRAY);
+  tft.drawCircle(centerX, centerY - 10, 8, RGB565(200, 210, 220));
+  
+  // Inner part (empty)
+  tft.fillCircle(centerX, centerY - 10, 7, LIGHT_BG);
+  
+  // Cut bottom to create shackle
+  tft.fillRect(centerX - 11, centerY - 10, 22, 11, LIGHT_BG);
+  
+  // Redraw shackle sides
+  for (int i = 0; i < 11; i++) {
+    tft.drawPixel(centerX - 10, centerY - 10 + i, DARK_TEXT);
+    tft.drawPixel(centerX + 10, centerY - 10 + i, DARK_TEXT);
+    tft.drawPixel(centerX - 9, centerY - 10 + i, MID_GRAY);
+    tft.drawPixel(centerX + 9, centerY - 10 + i, MID_GRAY);
+  }
+  
+  // Modern keyhole
+  tft.fillCircle(centerX, centerY + 6, 4, ACCENT_BLUE);
+  tft.fillCircle(centerX, centerY + 6, 3, BRIGHT_BLUE);
+  tft.fillCircle(centerX, centerY + 6, 1, RGB565(100, 150, 255));
+  
+  // Keyhole slot
+  tft.fillRect(centerX - 1, centerY + 8, 2, 6, BRIGHT_BLUE);
+  
+  // Highlight for depth
+  tft.drawFastHLine(centerX - 8, centerY - 5, 16, RGB565(255, 255, 255));
+  tft.drawPixel(centerX - 7, centerY - 4, RGB565(255, 255, 255));
+}
+
+// ======================================================
+// LIGHT LOCKED INDICATOR
+// ======================================================
+void drawLightLockedIndicator() {
+  tft.setTextSize(2);
+  char text[] = "LOCKED";
+  int16_t x1, y1;
+  uint16_t w, h;
+  tft.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
+  int textX = (SCREEN_W - w) / 2;
+  int textY = 85;  // Adjusted position
+  
+  // Soft container
+  tft.fillRoundRect(textX - 12, textY - 6, w + 24, h + 12, 10, RGB565(240, 245, 250));
+  tft.drawRoundRect(textX - 12, textY - 6, w + 24, h + 12, 10, BORDER_LIGHT);
+  
+  // Text with soft shadow
+  tft.setTextColor(RGB565(200, 205, 210));
+  tft.setCursor(textX + 1, textY + 1);
+  tft.print(text);
+  
+  // Main text
+  tft.setTextColor(DARK_TEXT);
+  tft.setCursor(textX, textY);
+  tft.print(text);
+  
+  // Decorative dots
+  tft.fillCircle(textX - 6, textY + h/2, 2, ACCENT_BLUE);
+  tft.fillCircle(textX + w + 6, textY + h/2, 2, ACCENT_BLUE);
+}
+
+// ======================================================
+// LIGHT PASSCODE AREA
+// ======================================================
+void drawLightPasscodeArea() {
+  int containerWidth = 110;
+  int containerHeight = 50;
+  int containerX = (SCREEN_W - containerWidth) / 2;
+  int containerY = 110;
+  
+  // Soft shadow
+  tft.fillRoundRect(containerX + 2, containerY + 2, containerWidth, containerHeight, 12, SHADOW_LIGHT);
+  
+  // Main container with gradient
+  for (int i = 0; i < containerHeight; i++) {
+    uint8_t brightness = 248 - (i / 10);
+    tft.drawFastHLine(containerX, containerY + i, containerWidth, RGB565(brightness, brightness, brightness + 2));
+  }
+  
+  // Border
+  tft.drawRoundRect(containerX, containerY, containerWidth, containerHeight, 12, BORDER_LIGHT);
+  tft.drawRoundRect(containerX + 1, containerY + 1, containerWidth - 2, containerHeight - 2, 11, RGB565(220, 230, 235));
+  
+  // Title
+  tft.setTextSize(1);
+  tft.setTextColor(MID_GRAY);
+  
+  char title[] = "ENTER PASSCODE";
+  int16_t x1, y1;
+  uint16_t w, h;
+  tft.getTextBounds(title, 0, 0, &x1, &y1, &w, &h);
+  int titleX = (SCREEN_W - w) / 2;
+  tft.setCursor(titleX, containerY + 10);
+  tft.print(title);
+  
+  drawLightPassCircles();
+}
+
+// ======================================================
+// LIGHT PASSCODE CIRCLES
+// ======================================================
+void drawLightPassCircles() {
+  int circleSpacing = 24;
+  int totalWidth = (PASS_LENGTH - 1) * circleSpacing;
+  int startX = (SCREEN_W - totalWidth) / 2;
+  int circleY = 138;
+  int circleRadius = 9;
+
+  for (int i = 0; i < PASS_LENGTH; i++) {
+    int circleX = startX + (i * circleSpacing);
+    
+    if (i < passIndex) {
+      // Filled circle with success color
+      // Soft glow
+      for (int g = 0; g < 3; g++) {
+        uint16_t glowColor = RGB565(100 + g * 30, 200 + g * 10, 150 + g * 20);
+        tft.drawCircle(circleX, circleY, circleRadius + 2 + g, glowColor);
+      }
+      
+      // Main filled circle
+      tft.fillCircle(circleX, circleY, circleRadius, SUCCESS_GREEN);
+      tft.fillCircle(circleX, circleY, circleRadius - 2, RGB565(100, 220, 150));
+      
+      // Highlight
+      tft.fillCircle(circleX - 3, circleY - 3, 2, RGB565(200, 255, 220));
+      
+      // Check mark
+      tft.drawLine(circleX - 3, circleY, circleX - 1, circleY + 2, ST77XX_WHITE);
+      tft.drawLine(circleX - 1, circleY + 2, circleX + 3, circleY - 2, ST77XX_WHITE);
+      
     } else {
-      Serial.println("[BLE] No peers connected");
+      // Empty circle - elegant outline
+      // Shadow
+      tft.drawCircle(circleX + 1, circleY + 1, circleRadius, SHADOW_LIGHT);
+      
+      // Double border for depth
+      tft.drawCircle(circleX, circleY, circleRadius, BORDER_LIGHT);
+      tft.drawCircle(circleX, circleY, circleRadius - 1, RGB565(200, 210, 220));
+      
+      // Inner fill
+      tft.fillCircle(circleX, circleY, circleRadius - 2, RGB565(252, 252, 254));
+      
+      // Center dot
+      tft.fillCircle(circleX, circleY, 2, RGB565(180, 190, 200));
     }
+    
+    // Number indicator
+    tft.setTextSize(1);
+    tft.setTextColor(SOFT_GRAY);
+    tft.setCursor(circleX - 2, circleY + 14);
+    tft.print(i + 1);
   }
+}
 
-  if (connected > 0 && !hidReady && connectTs != 0 && (millis() - connectTs) >= HID_READY_DELAY) {
-    hidReady = true;
-    Serial.println("[HID] HID ready - will send notifications now");
-  }
+// ======================================================
+// QUICK REDRAW CIRCLES
+// ======================================================
+void quickRedrawCircles() {
+  int containerWidth = 110;
+  int containerX = (SCREEN_W - containerWidth) / 2;
+  
+  // Redraw container area
+  tft.fillRect(containerX + 5, 126, containerWidth - 10, 30, RGB565(248, 248, 250));
+  
+  drawLightPassCircles();
+}
 
-  static unsigned long lastDiscTs = 0;
-  if (connected == 0) {
-    if (lastDiscTs == 0) lastDiscTs = millis();
-    if ((millis() - lastDiscTs) > ADV_RESTART_MS) {
-      if (pAdvertising && !pAdvertising->isAdvertising()) {
-        Serial.println("[BLE] Restarting advertising...");
-        pAdvertising->start();
+// ======================================================
+// BUTTON HANDLER WITH HAPTIC-LIKE FEEDBACK
+// ======================================================
+void handleButton() {
+  bool current = digitalRead(BUTTON_PIN);
+
+  if (current == LOW && lastButton == HIGH) {
+    delay(DEBOUNCE);
+    lastPressTime = millis();
+    
+    passIndex++;
+
+    // Calculate circle position
+    int circleSpacing = 24;
+    int totalWidth = (PASS_LENGTH - 1) * circleSpacing;
+    int startX = (SCREEN_W - totalWidth) / 2;
+    int circleX = startX + ((passIndex - 1) * circleSpacing);
+    int circleY = 138;
+    
+    // Smooth fill animation
+    for (int size = 3; size <= 9; size++) {
+      // Expanding green circle
+      tft.fillCircle(circleX, circleY, size, SUCCESS_GREEN);
+      
+      // Ripple effect
+      if (size < 9) {
+        tft.drawCircle(circleX, circleY, size + 3, RGB565(150, 230, 180));
       }
-      lastDiscTs = 0;
+      delay(8);
     }
-  } else {
-    lastDiscTs = 0;
+    
+    // Final state
+    tft.fillCircle(circleX, circleY, 9, SUCCESS_GREEN);
+    tft.fillCircle(circleX, circleY, 7, RGB565(100, 220, 150));
+    
+    // Check mark animation
+    tft.drawLine(circleX - 3, circleY, circleX - 1, circleY + 2, ST77XX_WHITE);
+    delay(15);
+    tft.drawLine(circleX - 1, circleY + 2, circleX + 3, circleY - 2, ST77XX_WHITE);
+    
+    if (passIndex >= PASS_LENGTH) {
+      currentState = UNLOCKING;
+      lightUnlockAnimation();
+      drawLightMainMenu();
+      currentState = MENU;
+    }
   }
 
-  if (button_flag) {
-    unsigned long now = millis();
-    if (now - lastDebounce >= DEBOUNCE_MS) {
-      lastDebounce = now;
-      if (digitalRead(BUTTON_PIN) == LOW) {
-        Serial.println("[BUTTON] pressed -> attempt send 'a'");
-        sendHIDKey(0x04); //=a
-      }
-    }
-    button_flag = false;
+  lastButton = current;
+}
+
+// ======================================================
+// LIGHT THEME UNLOCK ANIMATION
+// ======================================================
+void lightUnlockAnimation() {
+  int centerX = SCREEN_W / 2;
+  int centerY = 138;
+  
+  // Success burst
+  for (int r = 5; r < 100; r += 8) {
+    tft.drawCircle(centerX, centerY, r, SUCCESS_GREEN);
+    delay(6);
+  }
+  
+  // Flash to white
+  tft.fillScreen(ST77XX_WHITE);
+  delay(40);
+  
+  // Soft blue transition
+  tft.fillScreen(RGB565(230, 245, 255));
+  delay(30);
+  
+  tft.fillScreen(ST77XX_WHITE);
+  delay(20);
+}
+
+// ======================================================
+// LIGHT THEME MENU
+// ======================================================
+void drawLightMainMenu() {
+  // Gradient background
+  for (int y = 0; y < SCREEN_H; y++) {
+    uint8_t brightness = map(y, 0, SCREEN_H, 255, 240);
+    tft.drawFastHLine(0, y, SCREEN_W, RGB565(brightness - 8, brightness - 4, brightness));
   }
 
-  delay(10);
+  // Header card
+  tft.fillRoundRect(10, 10, 108, 40, 12, ST77XX_WHITE);
+  tft.drawRoundRect(10, 10, 108, 40, 12, BORDER_LIGHT);
+  
+  tft.setTextSize(3);
+  tft.setTextColor(DARK_TEXT);
+  
+  char header[] = "MENU";
+  int16_t x1, y1;
+  uint16_t w, h;
+  tft.getTextBounds(header, 0, 0, &x1, &y1, &w, &h);
+  int headerX = (SCREEN_W - w) / 2;
+  tft.setCursor(headerX, 22);
+  tft.print(header);
+
+  // Menu items
+  tft.setTextSize(2);
+  
+  // Selected item (highlighted)
+  tft.fillRoundRect(10, 60, 108, 32, 10, ACCENT_BLUE);
+  tft.drawRoundRect(10, 60, 108, 32, 10, BRIGHT_BLUE);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setCursor(22, 68);
+  tft.print("Settings");
+  
+  // Checkmark indicator
+  tft.fillCircle(102, 76, 4, ST77XX_WHITE);
+  
+  // Other items
+  tft.fillRoundRect(10, 98, 108, 28, 8, ST77XX_WHITE);
+  tft.drawRoundRect(10, 98, 108, 28, 8, BORDER_LIGHT);
+  tft.setTextColor(DARK_TEXT);
+  tft.setCursor(22, 104);
+  tft.print("Status");
+  
+  tft.fillRoundRect(10, 132, 108, 28, 8, ST77XX_WHITE);
+  tft.drawRoundRect(10, 132, 108, 28, 8, BORDER_LIGHT);
+  tft.setCursor(22, 138);
+  tft.print("About");
+
+  // Footer
+  tft.setTextSize(1);
+  tft.setTextColor(MID_GRAY);
+  
+  char footer[] = "Tap to select";
+  tft.getTextBounds(footer, 0, 0, &x1, &y1, &w, &h);
+  int footerX = (SCREEN_W - w) / 2;
+  tft.setCursor(footerX, 148);
+  tft.print(footer);
 }
