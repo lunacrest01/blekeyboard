@@ -17,17 +17,18 @@
 #define TIMEOUT_MS 5000
 #define DEBOUNCE   60
 
-// Light Theme Colors
-#define LIGHT_BG 0xFFFF
-#define SOFT_GRAY 0xE73C
-#define MID_GRAY 0xBDF7
-#define DARK_TEXT 0x4208
-#define ACCENT_BLUE 0x3C9F
-#define BRIGHT_BLUE 0x051D
+// Enhanced Color Palette
+#define MAIN_BG 0xF7BE        // Soft cream background
+#define CARD_BG 0xFFFF        // Pure white for cards
+#define SOFT_SHADOW 0xE71C    // Subtle shadow
+#define TEXT_PRIMARY 0x2945   // Deep blue-gray
+#define TEXT_SECONDARY 0x8C51 // Medium gray
+#define ACCENT_PURPLE 0x8A5F  // Soft purple
+#define ACCENT_PINK 0xFB5A    // Gentle pink
+#define ACCENT_BLUE 0x4E3F    // Calm blue
 #define SUCCESS_GREEN 0x07E8
-#define GOLDEN_YELLOW 0xFF80
-#define SHADOW_LIGHT 0xD6BA
-#define BORDER_LIGHT 0xCE59
+#define GOLDEN_GLOW 0xFFE0    // Warm golden
+#define BORDER_SOFT 0xDEDB    // Light border
 
 Adafruit_ST7735 tft(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
 
@@ -38,8 +39,8 @@ State currentState = BOOTING;
 uint8_t passIndex = 0;
 unsigned long lastPressTime = 0;
 bool lastButton = HIGH;
+uint8_t selectedMenuItem = 0;
 
-// Particle structure for effects
 struct Particle {
   float x, y;
   float vx, vy;
@@ -54,9 +55,14 @@ void drawPartialUnlockEnhancedSmall(int x, int y, int liftAmount);
 void drawSuccessBurstSmall(int x, int y);
 void drawSmallUnlockedLock(int x, int y);
 void drawGlowingUnlockedText(int x, int y);
-void drawLightMainMenuAtOffset(int xOffset, int yOffset);
+void drawEnhancedMenu();
 void fastTransitionToMenu();
 void animateSpectacularUnlock();
+void drawPartyEmoji(int x, int y);
+void drawHeartEmoji(int x, int y);
+void drawStarEmoji(int x, int y);
+void drawSparkleEmoji(int x, int y);
+void drawQuoteEmoji(int x, int y);
 
 // ======================================================
 // SETUP
@@ -86,6 +92,10 @@ void loop() {
     passIndex = 0;
     quickRedrawCircles();
   }
+  
+  if (currentState == MENU) {
+    // Menu navigation could be added here
+  }
 }
 
 // ======================================================
@@ -108,79 +118,243 @@ uint16_t RGB565(uint8_t r, uint8_t g, uint8_t b) {
 }
 
 // ======================================================
-// LIGHT THEME LOCK SCREEN
+// ENHANCED LOCK SCREEN WITH MATCHING COLORS
 // ======================================================
 void drawLockScreen() {
+  // Soft gradient background matching the theme
   for (int y = 0; y < SCREEN_H; y++) {
-    uint8_t brightness = map(y, 0, SCREEN_H, 245, 255);
-    tft.drawFastHLine(0, y, SCREEN_W, RGB565(brightness - 5, brightness - 2, brightness));
+    uint8_t r = 247 - (y / 8);
+    uint8_t g = 245 - (y / 10);
+    uint8_t b = 238 - (y / 12);
+    tft.drawFastHLine(0, y, SCREEN_W, RGB565(r, g, b));
   }
 
-  drawLockIcon(64, 45, false);
-  drawLightLockedIndicator();
-  drawLightPasscodeArea();
+  // Draw elegant lock card with multiple shadow layers
+  int cardY = 25;
+  int cardH = 90;
+  
+  // Multi-layer shadow for depth
+  tft.fillRoundRect(13, cardY + 4, 106, cardH, 18, RGB565(210, 215, 220));
+  tft.fillRoundRect(12, cardY + 3, 106, cardH, 18, RGB565(225, 230, 235));
+  tft.fillRoundRect(11, cardY + 2, 106, cardH, 18, SOFT_SHADOW);
+  
+  // Card background with subtle gradient
+  for (int i = 0; i < cardH; i++) {
+    uint8_t brightness = 255 - (i / 8);
+    tft.drawFastHLine(10, cardY + i, 108, RGB565(brightness, brightness, brightness + 2));
+  }
+  
+  // Border with inner glow
+  tft.drawRoundRect(10, cardY, 108, cardH, 18, ACCENT_PURPLE);
+  tft.drawRoundRect(11, cardY + 1, 106, cardH - 2, 17, RGB565(200, 180, 230));
+  
+  // Decorative corner accents
+  tft.fillCircle(20, cardY + 10, 3, ACCENT_PURPLE);
+  tft.fillCircle(108, cardY + 10, 3, ACCENT_PURPLE);
+  tft.fillCircle(20, cardY + cardH - 10, 3, ACCENT_PURPLE);
+  tft.fillCircle(108, cardY + cardH - 10, 3, ACCENT_PURPLE);
+  
+  drawEnhancedLockIcon(64, 60, false);
+  drawEnhancedLockedText();
+  drawEnhancedPasscodeArea();
 }
 
 // ======================================================
-// SIMPLE LOCK ICON (ANIMATABLE)
+// ENHANCED LOCK ICON WITH BETTER DESIGN
 // ======================================================
-void drawLockIcon(int x, int y, bool unlocked) {
-  tft.fillRect(x - 20, y - 20, 40, 40, LIGHT_BG);
-  
+void drawEnhancedLockIcon(int x, int y, bool unlocked) {
   if (unlocked) {
-    for (int i = 2; i > 0; i--) {
-      uint8_t alpha = 80 - (i * 20);
-      tft.drawRoundRect(x - 10 - i, y - 4 - i, 20 + i*2, 24 + i*2, 4, RGB565(50 + alpha, 200 + alpha/2, 100 + alpha));
+    // Glow effect for unlocked
+    for (int i = 4; i > 0; i--) {
+      uint16_t glowColor = RGB565(100 + i*30, 240 - i*15, 140 + i*25);
+      tft.drawRoundRect(x - 14 - i, y - 6 - i, 28 + i*2, 32 + i*2, 6, glowColor);
     }
   }
   
-  tft.fillRoundRect(x - 9, y - 3, 18, 24, 4, RGB565(210, 220, 230));
-  tft.fillRoundRect(x - 8, y - 2, 16, 22, 3, RGB565(230, 240, 245));
-  tft.drawRoundRect(x - 8, y - 2, 16, 22, 3, unlocked ? SUCCESS_GREEN : DARK_TEXT);
+  // Lock body with 3D effect and gradient
+  // Outer shadow
+  tft.fillRoundRect(x - 12, y - 4, 24, 28, 5, RGB565(200, 210, 220));
   
-  for (int i = 0; i < 10; i++) {
-    uint8_t shade = 230 + i * 2;
-    tft.drawFastHLine(x - 7, y + i, 14, RGB565(shade, shade + 5, shade + 8));
+  // Main body - gradient effect
+  for (int i = 0; i < 28; i++) {
+    uint8_t shade = 245 + (i / 4);
+    tft.drawFastHLine(x - 11, y - 3 + i, 22, RGB565(shade, shade + 2, shade + 5));
   }
   
+  // Border
+  tft.drawRoundRect(x - 11, y - 3, 22, 28, 5, unlocked ? SUCCESS_GREEN : ACCENT_PURPLE);
+  tft.drawRoundRect(x - 10, y - 2, 20, 26, 4, unlocked ? RGB565(150, 255, 180) : ACCENT_BLUE);
+  
+  // Decorative bands on lock body
+  tft.drawFastHLine(x - 9, y + 3, 18, RGB565(220, 225, 235));
+  tft.drawFastHLine(x - 9, y + 15, 18, RGB565(220, 225, 235));
+  
+  // Enhanced keyhole with glow
   if (unlocked) {
-    tft.fillCircle(x, y + 8, 3, RGB565(100, 255, 150));
-    tft.fillCircle(x, y + 8, 2, RGB565(200, 255, 220));
+    // Glowing keyhole
+    tft.fillCircle(x, y + 10, 5, RGB565(150, 255, 180));
+    tft.fillCircle(x, y + 10, 4, RGB565(100, 255, 150));
+    tft.fillCircle(x, y + 10, 3, RGB565(200, 255, 220));
+    tft.fillCircle(x, y + 10, 2, RGB565(230, 255, 240));
+    
+    // Keyhole shine
+    tft.drawPixel(x - 2, y + 8, CARD_BG);
+    tft.drawPixel(x - 1, y + 8, CARD_BG);
   } else {
-    tft.fillCircle(x, y + 8, 3, ACCENT_BLUE);
-    tft.fillCircle(x, y + 8, 2, BRIGHT_BLUE);
+    // Regular keyhole with depth
+    tft.fillCircle(x + 1, y + 11, 4, RGB565(180, 185, 200));
+    tft.fillCircle(x, y + 10, 4, ACCENT_BLUE);
+    tft.fillCircle(x, y + 10, 3, RGB565(100, 140, 200));
+    tft.fillCircle(x, y + 10, 2, ACCENT_PURPLE);
+    
+    // Keyhole shine
+    tft.drawPixel(x - 2, y + 8, RGB565(220, 230, 245));
   }
-  tft.fillRect(x - 1, y + 9, 2, 6, unlocked ? RGB565(100, 255, 150) : ACCENT_BLUE);
   
+  // Keyhole slot
+  tft.fillRect(x - 1, y + 12, 3, 8, unlocked ? RGB565(150, 255, 180) : ACCENT_PURPLE);
+  tft.drawFastVLine(x - 1, y + 12, 8, unlocked ? RGB565(100, 255, 150) : RGB565(80, 120, 180));
+  tft.drawFastVLine(x + 1, y + 12, 8, unlocked ? RGB565(180, 255, 200) : RGB565(120, 160, 220));
+  
+  // Shackle
   if (!unlocked) {
-    for (int thick = 0; thick < 2; thick++) {
-      tft.drawCircle(x, y - 10, 8 - thick, RGB565(160, 170, 190));
+    // Shackle with 3D effect
+    for (int thick = 0; thick < 3; thick++) {
+      uint16_t shackleColor = (thick == 0) ? RGB565(160, 140, 200) : 
+                              (thick == 1) ? ACCENT_PURPLE : ACCENT_BLUE;
+      tft.drawCircle(x, y - 14, 11 - thick, shackleColor);
     }
-    tft.drawFastVLine(x - 8, y - 10, 10, RGB565(140, 150, 170));
-    tft.drawFastVLine(x + 8, y - 10, 10, RGB565(140, 150, 170));
-    tft.fillRect(x - 8, y - 2, 2, 2, RGB565(200, 210, 220));
-    tft.fillRect(x + 7, y - 2, 2, 2, RGB565(200, 210, 220));
+    
+    // Shackle sides with gradient
+    for (int i = 0; i < 14; i++) {
+      uint8_t shade = 160 + (i * 3);
+      tft.drawPixel(x - 11, y - 14 + i, RGB565(shade - 40, shade - 60, shade + 20));
+      tft.drawPixel(x + 11, y - 14 + i, RGB565(shade - 40, shade - 60, shade + 20));
+      tft.drawPixel(x - 10, y - 14 + i, RGB565(shade - 20, shade - 40, shade + 40));
+      tft.drawPixel(x + 10, y - 14 + i, RGB565(shade - 20, shade - 40, shade + 40));
+    }
+    
+    // Shackle connection point
+    tft.fillRect(x - 11, y - 3, 4, 3, RGB565(220, 225, 235));
+    tft.fillRect(x + 8, y - 3, 4, 3, RGB565(220, 225, 235));
+    
   } else {
-    int uY = y - 20;
+    // Open shackle position
+    int uY = y - 28;
     
+    // Shackle glow
     for (int g = 3; g > 0; g--) {
-      uint8_t alpha = 60 - (g * 15);
-      tft.drawCircle(x, uY, 8 + g, RGB565(100 + alpha, 220 + alpha/2, 150 + alpha));
+      uint8_t alpha = 60 - (g * 12);
+      tft.drawCircle(x, uY, 11 + g, RGB565(100 + alpha, 220 + alpha/2, 150 + alpha));
     }
     
-    for (int thick = 0; thick < 2; thick++) {
-      tft.drawCircle(x, uY, 8 - thick, SUCCESS_GREEN);
+    // Shackle
+    for (int thick = 0; thick < 3; thick++) {
+      tft.drawCircle(x, uY, 11 - thick, SUCCESS_GREEN);
     }
-    tft.drawFastVLine(x - 8, uY, 8, SUCCESS_GREEN);
-    tft.drawFastVLine(x + 8, uY, 8, SUCCESS_GREEN);
     
-    tft.drawPixel(x - 5, uY - 6, RGB565(200, 255, 220));
-    tft.drawPixel(x + 5, uY - 6, RGB565(200, 255, 220));
+    // Shackle sides
+    for (int i = 0; i < 10; i++) {
+      tft.drawPixel(x - 11, uY + i, SUCCESS_GREEN);
+      tft.drawPixel(x + 11, uY + i, SUCCESS_GREEN);
+      tft.drawPixel(x - 10, uY + i, RGB565(150, 240, 180));
+      tft.drawPixel(x + 10, uY + i, RGB565(150, 240, 180));
+    }
+    
+    // Sparkle on shackle
+    tft.drawPixel(x - 6, uY - 8, RGB565(200, 255, 220));
+    tft.drawPixel(x + 6, uY - 8, RGB565(200, 255, 220));
   }
 }
 
 // ======================================================
-// ENHANCED PARTIAL UNLOCK - SMALL VERSION
+// ENHANCED LOCKED TEXT
+// ======================================================
+void drawEnhancedLockedText() {
+  tft.setTextSize(1);
+  char text[] = "LOCKED";
+  int16_t x1, y1;
+  uint16_t w, h;
+  tft.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
+  int textX = (SCREEN_W - w) / 2;
+  int textY = 92;
+  
+  // Subtle shadow
+  tft.setTextColor(SOFT_SHADOW);
+  tft.setCursor(textX + 1, textY + 1);
+  tft.print(text);
+  
+  tft.setTextColor(TEXT_PRIMARY);
+  tft.setCursor(textX, textY);
+  tft.print(text);
+}
+
+// ======================================================
+// ENHANCED PASSCODE AREA
+// ======================================================
+void drawEnhancedPasscodeArea() {
+  int containerY = 118;
+  
+  tft.setTextSize(1);
+  tft.setTextColor(TEXT_SECONDARY);
+  
+  char title[] = "Enter Passcode";
+  int16_t x1, y1;
+  uint16_t w, h;
+  tft.getTextBounds(title, 0, 0, &x1, &y1, &w, &h);
+  int titleX = (SCREEN_W - w) / 2;
+  tft.setCursor(titleX, containerY);
+  tft.print(title);
+  
+  drawEnhancedPassCircles();
+}
+
+// ======================================================
+// ENHANCED PASSCODE CIRCLES
+// ======================================================
+void drawEnhancedPassCircles() {
+  int circleSpacing = 26;
+  int totalWidth = (PASS_LENGTH - 1) * circleSpacing;
+  int startX = (SCREEN_W - totalWidth) / 2;
+  int circleY = 140;
+  int circleRadius = 8;
+
+  for (int i = 0; i < PASS_LENGTH; i++) {
+    int circleX = startX + (i * circleSpacing);
+    
+    if (i < passIndex) {
+      // Filled with glow
+      for (int g = 0; g < 2; g++) {
+        tft.drawCircle(circleX, circleY, circleRadius + 1 + g, RGB565(120 + g*30, 200 + g*20, 150 + g*25));
+      }
+      
+      tft.fillCircle(circleX, circleY, circleRadius, SUCCESS_GREEN);
+      tft.fillCircle(circleX, circleY, circleRadius - 2, RGB565(150, 240, 180));
+      
+      // Checkmark
+      tft.drawLine(circleX - 3, circleY, circleX - 1, circleY + 2, CARD_BG);
+      tft.drawLine(circleX - 1, circleY + 2, circleX + 3, circleY - 2, CARD_BG);
+      
+    } else {
+      // Empty with soft styling
+      tft.fillCircle(circleX + 1, circleY + 1, circleRadius, SOFT_SHADOW);
+      tft.fillCircle(circleX, circleY, circleRadius, CARD_BG);
+      tft.drawCircle(circleX, circleY, circleRadius, BORDER_SOFT);
+      tft.fillCircle(circleX, circleY, 2, TEXT_SECONDARY);
+    }
+  }
+}
+
+// ======================================================
+// QUICK REDRAW CIRCLES
+// ======================================================
+void quickRedrawCircles() {
+  tft.fillRect(20, 130, 88, 25, MAIN_BG);
+  drawEnhancedPassCircles();
+}
+
+// ======================================================
+// PARTIAL UNLOCK ANIMATION
 // ======================================================
 void drawPartialUnlockEnhancedSmall(int x, int y, int liftAmount) {
   uint8_t glowIntensity = map(liftAmount, 0, 10, 0, 100);
@@ -189,7 +363,7 @@ void drawPartialUnlockEnhancedSmall(int x, int y, int liftAmount) {
     tft.drawRoundRect(x - 7, y - 2, 14, 18, 3, RGB565(100 + glowIntensity, 200 + glowIntensity/2, 150 + glowIntensity));
   }
   
-  tft.fillRoundRect(x - 6, y - 1, 12, 16, 2, RGB565(230, 240, 245));
+  tft.fillRoundRect(x - 6, y - 1, 12, 16, 2, RGB565(250, 250, 252));
   tft.drawRoundRect(x - 6, y - 1, 12, 16, 2, RGB565(100 - glowIntensity/2, 150 + glowIntensity, 100));
   
   uint16_t keyholeColor = RGB565(60 + glowIntensity * 2, 150 + glowIntensity, 255 - glowIntensity * 2);
@@ -211,14 +385,11 @@ void drawPartialUnlockEnhancedSmall(int x, int y, int liftAmount) {
   if (connectionHeight > 0) {
     tft.drawFastVLine(x - 6, uY + 3, connectionHeight, uColor);
     tft.drawFastVLine(x + 6, uY + 3, connectionHeight, uColor);
-  } else {
-    tft.drawPixel(x - 6, y - 1, GOLDEN_YELLOW);
-    tft.drawPixel(x + 6, y - 1, GOLDEN_YELLOW);
   }
 }
 
 // ======================================================
-// SMALL SUCCESS BURST EFFECT (FASTER)
+// SUCCESS BURST EFFECT
 // ======================================================
 void drawSuccessBurstSmall(int x, int y) {
   Particle particles[10];
@@ -236,7 +407,7 @@ void drawSuccessBurstSmall(int x, int y) {
   for (int frame = 0; frame < 5; frame++) {
     for (int i = 0; i < 10; i++) {
       if (particles[i].life > 0) {
-        tft.fillCircle((int)particles[i].x, (int)particles[i].y, 1, LIGHT_BG);
+        tft.fillCircle((int)particles[i].x, (int)particles[i].y, 1, CARD_BG);
         
         particles[i].x += particles[i].vx;
         particles[i].y += particles[i].vy;
@@ -251,12 +422,12 @@ void drawSuccessBurstSmall(int x, int y) {
         }
       }
     }
-    delay(10);  // Reduced from 12ms to 10ms
+    delay(10);
   }
 }
 
 // ======================================================
-// DRAW SMALL UNLOCKED LOCK
+// SMALL UNLOCKED LOCK
 // ======================================================
 void drawSmallUnlockedLock(int x, int y) {
   for (int i = 2; i > 0; i--) {
@@ -264,17 +435,12 @@ void drawSmallUnlockedLock(int x, int y) {
     tft.drawRoundRect(x - 7 - i, y - 2 - i, 14 + i*2, 18 + i*2, 3, RGB565(50 + alpha, 200 + alpha/2, 100 + alpha));
   }
   
-  tft.fillRoundRect(x - 6, y - 1, 12, 16, 2, RGB565(230, 240, 245));
+  tft.fillRoundRect(x - 6, y - 1, 12, 16, 2, RGB565(250, 250, 252));
   tft.drawRoundRect(x - 6, y - 1, 12, 16, 2, SUCCESS_GREEN);
   
-  for (int i = 0; i < 8; i++) {
-    uint8_t shade = 230 + i * 2;
-    tft.drawFastHLine(x - 5, y + i, 10, RGB565(shade, shade + 5, shade + 8));
-  }
-  
-  tft.fillCircle(x, y + 6, 2, RGB565(100, 255, 150));
+  tft.fillCircle(x, y + 6, 2, RGB565(120, 255, 170));
   tft.fillCircle(x, y + 6, 1, RGB565(200, 255, 220));
-  tft.fillRect(x - 1, y + 7, 2, 4, RGB565(100, 255, 150));
+  tft.fillRect(x - 1, y + 7, 2, 4, RGB565(120, 255, 170));
   
   int uY = y - 16;
   
@@ -287,13 +453,10 @@ void drawSmallUnlockedLock(int x, int y) {
   tft.drawCircle(x, uY, 5, SUCCESS_GREEN);
   tft.drawFastVLine(x - 6, uY, 6, SUCCESS_GREEN);
   tft.drawFastVLine(x + 6, uY, 6, SUCCESS_GREEN);
-  
-  tft.drawPixel(x - 4, uY - 4, RGB565(200, 255, 220));
-  tft.drawPixel(x + 4, uY - 4, RGB565(200, 255, 220));
 }
 
 // ======================================================
-// DRAW GLOWING "UNLOCKED" TEXT
+// GLOWING UNLOCKED TEXT
 // ======================================================
 void drawGlowingUnlockedText(int x, int y) {
   tft.setTextSize(1);
@@ -304,15 +467,11 @@ void drawGlowingUnlockedText(int x, int y) {
   tft.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
   int textX = x - w/2;
   
-  for (int glow = 3; glow > 0; glow--) {
-    uint16_t glowColor = RGB565(80 + glow * 15, 180 + glow * 20, 120 + glow * 15);
+  for (int glow = 2; glow > 0; glow--) {
+    uint16_t glowColor = RGB565(80 + glow * 20, 200 + glow * 20, 120 + glow * 20);
     
     tft.setTextColor(glowColor);
     tft.setCursor(textX - glow, y - glow);
-    tft.print(text);
-    tft.setCursor(textX + glow, y - glow);
-    tft.print(text);
-    tft.setCursor(textX - glow, y + glow);
     tft.print(text);
     tft.setCursor(textX + glow, y + glow);
     tft.print(text);
@@ -321,262 +480,277 @@ void drawGlowingUnlockedText(int x, int y) {
   tft.setTextColor(SUCCESS_GREEN);
   tft.setCursor(textX, y);
   tft.print(text);
-  
-  tft.setTextColor(RGB565(200, 255, 220));
-  tft.setCursor(textX, y - 1);
-  tft.print(text);
 }
 
 // ======================================================
-// SPECTACULAR UNLOCK ANIMATION (FASTER)
+// SPECTACULAR UNLOCK ANIMATION WITH EMOJI
 // ======================================================
 void animateSpectacularUnlock() {
   int centerX = 64;
-  int centerY = 45;
+  int centerY = 60;
   
-  for (int shake = 0; shake < 2; shake++) {
-    int offset = (shake % 2 == 0) ? 2 : -2;
-    tft.fillRect(centerX - 20, centerY - 20, 40, 40, LIGHT_BG);
+  // Shake effect
+  for (int shake = 0; shake < 3; shake++) {
+    int offset = (shake % 2 == 0) ? 3 : -3;
+    tft.fillRect(centerX - 20, centerY - 25, 40, 50, CARD_BG);
     
-    tft.fillRoundRect(centerX + offset - 6, centerY - 1, 12, 16, 2, RGB565(230, 240, 245));
-    tft.drawRoundRect(centerX + offset - 6, centerY - 1, 12, 16, 2, DARK_TEXT);
-    tft.fillCircle(centerX + offset, centerY + 6, 1, GOLDEN_YELLOW);
+    tft.fillRoundRect(centerX + offset - 6, centerY - 1, 12, 16, 2, RGB565(250, 250, 252));
+    tft.drawRoundRect(centerX + offset - 6, centerY - 1, 12, 16, 2, TEXT_PRIMARY);
+    tft.fillCircle(centerX + offset, centerY + 6, 1, GOLDEN_GLOW);
     
-    delay(20);
+    delay(25);
   }
   
-  for (int size = 0; size < 3; size++) {
-    tft.drawCircle(centerX, centerY, 12 + size * 6, RGB565(100, 200 - size * 30, 255 - size * 40));
-    delay(12);
+  // Multiple expanding ripple waves
+  for (int wave = 0; wave < 4; wave++) {
+    for (int size = 0; size < 4; size++) {
+      uint16_t waveColor = RGB565(150 - size * 30, 220 - size * 40, 255 - size * 50);
+      tft.drawCircle(centerX, centerY, 15 + size * 8 + wave * 3, waveColor);
+    }
+    delay(18);
   }
   
-  for (int lift = 0; lift <= 10; lift += 3) {
-    tft.fillRect(centerX - 20, centerY - 30, 40, 50, LIGHT_BG);
+  // Smooth lift shackle with trail effect
+  for (int lift = 0; lift <= 12; lift += 2) {
+    tft.fillRect(centerX - 20, centerY - 35, 40, 55, CARD_BG);
     
-    if (lift > 0) {
-      int prevLift = lift - 3;
-      int prevUY = centerY - 8 - prevLift;
-      uint16_t trailColor = RGB565(150 + prevLift * 5, 200 + prevLift * 3, 180 + prevLift * 4);
-      tft.drawCircle(centerX, prevUY, 6, trailColor);
+    // Draw motion trail
+    if (lift > 2) {
+      for (int trail = 1; trail <= 3; trail++) {
+        int trailLift = lift - (trail * 2);
+        if (trailLift >= 0) {
+          uint8_t alpha = 80 - (trail * 25);
+          int trailY = centerY - 8 - trailLift;
+          tft.drawCircle(centerX, trailY, 6, RGB565(100 + alpha, 200, 150 + alpha));
+        }
+      }
     }
     
     drawPartialUnlockEnhancedSmall(centerX, centerY, lift);
+    delay(20);
+  }
+  
+  // Enhanced burst with sparkles
+  drawSuccessBurstSmall(centerX, centerY);
+  
+  // Draw sparkle particles around
+  for (int i = 0; i < 8; i++) {
+    float angle = (i * 45) * PI / 180.0;
+    int sx = centerX + cos(angle) * 25;
+    int sy = centerY + sin(angle) * 25;
+    tft.fillCircle(sx, sy, 2, GOLDEN_GLOW);
+    tft.drawPixel(sx - 1, sy - 1, RGB565(255, 255, 200));
+  }
+  delay(50);
+  
+  // Clear and show final state
+  tft.fillRect(centerX - 40, centerY - 40, 80, 85, CARD_BG);
+  drawSmallUnlockedLock(centerX, centerY);
+  
+  // Animated glowing text
+  for (int glow = 0; glow < 3; glow++) {
+    drawGlowingUnlockedText(centerX, centerY + 28);
+    delay(40);
+  }
+  
+  // Draw celebration emoji (party popper)
+  drawPartyEmoji(centerX - 35, centerY + 40);
+  drawPartyEmoji(centerX + 25, centerY + 40);
+  
+  delay(150);
+}
+
+// ======================================================
+// CASCADING TRANSITION TO MENU
+// ======================================================
+void fastTransitionToMenu() {
+  // Fade background
+  for (int y = 0; y < SCREEN_H; y++) {
+    uint8_t r = 247 - (y / 8);
+    uint8_t g = 245 - (y / 10);
+    uint8_t b = 238 - (y / 12);
+    tft.drawFastHLine(0, y, SCREEN_W, RGB565(r, g, b));
+  }
+  
+  // Slide in menu items one by one
+  const char* items[] = {"Hope Letter", "Memories", "Quote", "About"};
+  uint16_t colors[] = {ACCENT_PURPLE, ACCENT_PINK, ACCENT_BLUE, RGB565(255, 180, 100)};
+  
+  // Title
+  tft.setTextSize(2);
+  tft.setTextColor(TEXT_PRIMARY);
+  tft.setCursor(42, 12);
+  tft.print("MENU");
+  
+  tft.drawFastHLine(20, 30, 88, BORDER_SOFT);
+  
+  // Animate each menu item
+  for (int item = 0; item < 4; item++) {
+    int itemY = 45 + (item * 28);
+    
+    for (int slide = SCREEN_W; slide >= 0; slide -= 32) {
+      tft.fillRect(0, itemY, SCREEN_W, 24, MAIN_BG);
+      
+      if (8 + slide >= 0 && 8 + slide < SCREEN_W) {
+        int rectX = max(0, 8 + slide);
+        int rectW = min(112 + slide, SCREEN_W) - rectX;
+        
+        if (rectW > 0) {
+          // Shadow
+          tft.fillRoundRect(rectX + 2, itemY + 2, rectW, 20, 10, SOFT_SHADOW);
+          // Card
+          tft.fillRoundRect(rectX, itemY, rectW, 20, 10, CARD_BG);
+          tft.drawRoundRect(rectX, itemY, rectW, 20, 10, colors[item]);
+        }
+        
+        if (18 + slide >= 0 && 18 + slide < SCREEN_W) {
+          tft.setTextSize(1);
+          tft.setTextColor(TEXT_PRIMARY);
+          tft.setCursor(18 + slide, itemY + 6);
+          
+          // Draw number
+          tft.fillCircle(14 + slide, itemY + 10, 6, colors[item]);
+          tft.setTextColor(CARD_BG);
+          tft.setCursor(11 + slide, itemY + 6);
+          tft.print(item + 1);
+          
+          tft.setTextColor(TEXT_PRIMARY);
+          tft.setCursor(28 + slide, itemY + 6);
+          tft.print(items[item]);
+        }
+      }
+      delay(2);
+    }
     delay(15);
   }
   
-  drawSuccessBurstSmall(centerX, centerY);
-  
-  tft.fillRect(centerX - 35, centerY - 35, 70, 70, LIGHT_BG);
-  drawSmallUnlockedLock(centerX, centerY);
-  drawGlowingUnlockedText(centerX, centerY + 25);
-  
-  delay(100);  // Reduced from 150ms to 100ms
+  delay(50);
+  drawEnhancedMenu();
 }
 
 // ======================================================
-// CASCADING SLIDE TRANSITION TO MENU (0.2 SECONDS)
+// ENHANCED MENU WITH EMOJIS
 // ======================================================
-void fastTransitionToMenu() {
-  // Clear screen and draw static header
-  tft.fillScreen(LIGHT_BG);
-  
-  // Draw MENU title (static)
-  tft.setTextSize(3);
-  tft.setTextColor(DARK_TEXT);
-  tft.setCursor(40, 15);
-  tft.print("MENU");
-  
-  // Draw divider line
-  tft.drawFastHLine(20, 38, 88, BORDER_LIGHT);
-  
-  // Cascading slide animation for each menu item
-  // Each item slides in one after another with slight delay
-  
-  // Item 1: "Settings" (selected) - slides first
-  for (int slide = SCREEN_W; slide >= 0; slide -= 32) {
-    // Clear previous position
-    tft.fillRect(0, 50, SCREEN_W, 26, LIGHT_BG);
-    
-    // Draw sliding item
-    if (8 + slide >= 0 && 8 + slide < SCREEN_W) {
-      int rectX = max(0, 8 + slide);
-      int rectW = min(120 + slide, SCREEN_W) - rectX;
-      if (rectW > 0) {
-        tft.fillRoundRect(rectX, 50, rectW, 26, 8, ACCENT_BLUE);
-      }
-      
-      if (20 + slide >= 0 && 20 + slide < SCREEN_W) {
-        tft.setTextSize(2);
-        tft.setTextColor(ST77XX_WHITE);
-        tft.setCursor(20 + slide, 56);
-        tft.print("Settings");
-      }
-    }
-    delay(2);
+void drawEnhancedMenu() {
+  // Background gradient
+  for (int y = 0; y < SCREEN_H; y++) {
+    uint8_t r = 247 - (y / 8);
+    uint8_t g = 245 - (y / 10);
+    uint8_t b = 238 - (y / 12);
+    tft.drawFastHLine(0, y, SCREEN_W, RGB565(r, g, b));
   }
   
-  delay(15);
+  // Decorative header card
+  tft.fillRoundRect(18, 8, 92, 26, 13, CARD_BG);
+  tft.drawRoundRect(18, 8, 92, 26, 13, ACCENT_PURPLE);
   
-  // Item 2: "Status" - slides second
-  for (int slide = SCREEN_W; slide >= 0; slide -= 32) {
-    // Clear previous position
-    tft.fillRect(0, 88, SCREEN_W, 20, LIGHT_BG);
-    
-    if (20 + slide >= 0 && 20 + slide < SCREEN_W) {
-      tft.setTextSize(2);
-      tft.setTextColor(DARK_TEXT);
-      tft.setCursor(20 + slide, 88);
-      tft.print("Status");
-    }
-    delay(2);
-  }
-  
-  delay(15);
-  
-  // Item 3: "About" - slides third
-  for (int slide = SCREEN_W; slide >= 0; slide -= 32) {
-    // Clear previous position
-    tft.fillRect(0, 118, SCREEN_W, 20, LIGHT_BG);
-    
-    if (20 + slide >= 0 && 20 + slide < SCREEN_W) {
-      tft.setTextSize(2);
-      tft.setTextColor(DARK_TEXT);
-      tft.setCursor(20 + slide, 118);
-      tft.print("About");
-    }
-    delay(2);
-  }
-  
-  delay(15);
-  
-  // Item 4: Footer hint - slides last
-  for (int slide = SCREEN_W; slide >= 0; slide -= 32) {
-    // Clear previous position
-    tft.fillRect(0, 148, SCREEN_W, 12, LIGHT_BG);
-    
-    if (30 + slide >= 0 && 30 + slide < SCREEN_W) {
-      tft.setTextSize(1);
-      tft.setTextColor(MID_GRAY);
-      tft.setCursor(30 + slide, 148);
-      tft.print("Tap to select");
-    }
-    delay(2);
-  }
-  
-  // Final clean render
-  tft.fillScreen(LIGHT_BG);
-  drawLightMainMenuAtOffset(0, 0);
-}
-
-// ======================================================
-// LIGHT LOCKED INDICATOR
-// ======================================================
-void drawLightLockedIndicator() {
+  // Title with sparkle emoji
+  drawSparkleEmoji(26, 16);
   tft.setTextSize(2);
-  char text[] = "LOCKED";
-  int16_t x1, y1;
-  uint16_t w, h;
-  tft.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
-  int textX = (SCREEN_W - w) / 2;
-  int textY = 85;
+  tft.setTextColor(TEXT_PRIMARY);
+  tft.setCursor(42, 16);
+  tft.print("MENU");
+  drawSparkleEmoji(92, 16);
   
-  tft.fillRoundRect(textX - 12, textY - 6, w + 24, h + 12, 10, RGB565(240, 245, 250));
-  tft.drawRoundRect(textX - 12, textY - 6, w + 24, h + 12, 10, BORDER_LIGHT);
-  
-  tft.setTextColor(RGB565(200, 205, 210));
-  tft.setCursor(textX + 1, textY + 1);
-  tft.print(text);
-  
-  tft.setTextColor(DARK_TEXT);
-  tft.setCursor(textX, textY);
-  tft.print(text);
-  
-  tft.fillCircle(textX - 6, textY + h/2, 2, ACCENT_BLUE);
-  tft.fillCircle(textX + w + 6, textY + h/2, 2, ACCENT_BLUE);
-}
-
-// ======================================================
-// LIGHT PASSCODE AREA
-// ======================================================
-void drawLightPasscodeArea() {
-  int containerWidth = 110;
-  int containerHeight = 50;
-  int containerX = (SCREEN_W - containerWidth) / 2;
-  int containerY = 110;
-  
-  tft.fillRoundRect(containerX + 2, containerY + 2, containerWidth, containerHeight, 12, SHADOW_LIGHT);
-  
-  for (int i = 0; i < containerHeight; i++) {
-    uint8_t brightness = 248 - (i / 10);
-    tft.drawFastHLine(containerX, containerY + i, containerWidth, RGB565(brightness, brightness, brightness + 2));
+  // Subtle divider
+  for (int i = 0; i < 3; i++) {
+    uint16_t divColor = RGB565(220 + i * 10, 225 + i * 10, 230 + i * 10);
+    tft.drawFastHLine(20 + i, 38, 88 - i * 2, divColor);
   }
   
-  tft.drawRoundRect(containerX, containerY, containerWidth, containerHeight, 12, BORDER_LIGHT);
-  tft.drawRoundRect(containerX + 1, containerY + 1, containerWidth - 2, containerHeight - 2, 11, RGB565(220, 230, 235));
+  // Menu items with emojis and enhanced styling
+  const char* items[] = {"Hope Letter", "Memories", "Quote", "About"};
+  uint16_t colors[] = {
+    RGB565(180, 120, 230),  // Purple
+    RGB565(255, 140, 180),  // Pink
+    RGB565(120, 180, 255),  // Blue
+    RGB565(255, 190, 120)   // Orange
+  };
   
-  tft.setTextSize(1);
-  tft.setTextColor(MID_GRAY);
-  
-  char title[] = "ENTER PASSCODE";
-  int16_t x1, y1;
-  uint16_t w, h;
-  tft.getTextBounds(title, 0, 0, &x1, &y1, &w, &h);
-  int titleX = (SCREEN_W - w) / 2;
-  tft.setCursor(titleX, containerY + 10);
-  tft.print(title);
-  
-  drawLightPassCircles();
-}
-
-// ======================================================
-// LIGHT PASSCODE CIRCLES
-// ======================================================
-void drawLightPassCircles() {
-  int circleSpacing = 24;
-  int totalWidth = (PASS_LENGTH - 1) * circleSpacing;
-  int startX = (SCREEN_W - totalWidth) / 2;
-  int circleY = 138;
-  int circleRadius = 9;
-
-  for (int i = 0; i < PASS_LENGTH; i++) {
-    int circleX = startX + (i * circleSpacing);
+  for (int i = 0; i < 4; i++) {
+    int itemY = 48 + (i * 27);
     
-    if (i < passIndex) {
-      for (int g = 0; g < 3; g++) {
-        uint16_t glowColor = RGB565(100 + g * 30, 200 + g * 10, 150 + g * 20);
-        tft.drawCircle(circleX, circleY, circleRadius + 2 + g, glowColor);
-      }
-      
-      tft.fillCircle(circleX, circleY, circleRadius, SUCCESS_GREEN);
-      tft.fillCircle(circleX, circleY, circleRadius - 2, RGB565(100, 220, 150));
-      tft.fillCircle(circleX - 3, circleY - 3, 2, RGB565(200, 255, 220));
-      
-      tft.drawLine(circleX - 3, circleY, circleX - 1, circleY + 2, ST77XX_WHITE);
-      tft.drawLine(circleX - 1, circleY + 2, circleX + 3, circleY - 2, ST77XX_WHITE);
-      
-    } else {
-      tft.drawCircle(circleX + 1, circleY + 1, circleRadius, SHADOW_LIGHT);
-      tft.drawCircle(circleX, circleY, circleRadius, BORDER_LIGHT);
-      tft.drawCircle(circleX, circleY, circleRadius - 1, RGB565(200, 210, 220));
-      tft.fillCircle(circleX, circleY, circleRadius - 2, RGB565(252, 252, 254));
-      tft.fillCircle(circleX, circleY, 2, RGB565(180, 190, 200));
+    // Enhanced shadow (multi-layer)
+    tft.fillRoundRect(11, itemY + 3, 108, 22, 11, SOFT_SHADOW);
+    tft.fillRoundRect(10, itemY + 2, 108, 22, 11, RGB565(230, 235, 240));
+    
+    // Card background with gradient effect
+    for (int line = 0; line < 22; line++) {
+      uint8_t brightness = 255 - (line / 2);
+      uint16_t lineColor = RGB565(brightness, brightness, brightness);
+      tft.drawFastHLine(8, itemY + line, 112, lineColor);
     }
     
+    // Border with glow
+    tft.drawRoundRect(8, itemY, 112, 22, 11, colors[i]);
+    tft.drawRoundRect(9, itemY + 1, 110, 20, 10, RGB565(
+      ((colors[i] >> 11) * 8 + 200) / 2,
+      (((colors[i] >> 5) & 0x3F) * 4 + 200) / 2,
+      ((colors[i] & 0x1F) * 8 + 200) / 2
+    ));
+    
+    // Glowing number circle
+    for (int g = 2; g > 0; g--) {
+      uint16_t glowColor = RGB565(
+        ((colors[i] >> 11) * 8 + g * 30) / 2,
+        (((colors[i] >> 5) & 0x3F) * 4 + g * 20) / 2,
+        ((colors[i] & 0x1F) * 8 + g * 30) / 2
+      );
+      tft.drawCircle(21, itemY + 11, 8 + g, glowColor);
+    }
+    
+    tft.fillCircle(21, itemY + 11, 8, colors[i]);
+    tft.fillCircle(21, itemY + 11, 6, RGB565(
+      ((colors[i] >> 11) * 8 + 100) / 2,
+      (((colors[i] >> 5) & 0x3F) * 4 + 100) / 2,
+      ((colors[i] & 0x1F) * 8 + 100) / 2
+    ));
+    
+    // Number text
     tft.setTextSize(1);
-    tft.setTextColor(SOFT_GRAY);
-    tft.setCursor(circleX - 2, circleY + 14);
+    tft.setTextColor(CARD_BG);
+    tft.setCursor(18, itemY + 7);
     tft.print(i + 1);
+    
+    // Draw emoji for each menu item
+    int emojiX = 36;
+    int emojiY = itemY + 7;
+    
+    switch(i) {
+      case 0: // Hope Letter
+        drawHeartEmoji(emojiX, emojiY);
+        break;
+      case 1: // Memories
+        drawStarEmoji(emojiX, emojiY);
+        break;
+      case 2: // Quote
+        drawQuoteEmoji(emojiX, emojiY);
+        break;
+      case 3: // About
+        drawSparkleEmoji(emojiX, emojiY);
+        break;
+    }
+    
+    // Item text
+    tft.setTextColor(TEXT_PRIMARY);
+    tft.setCursor(48, itemY + 7);
+    tft.print(items[i]);
+    
+    // Subtle shine effect on card
+    tft.drawFastHLine(12, itemY + 2, 30, RGB565(255, 255, 255));
+    tft.drawPixel(13, itemY + 3, RGB565(245, 245, 250));
   }
-}
-
-// ======================================================
-// QUICK REDRAW CIRCLES
-// ======================================================
-void quickRedrawCircles() {
-  int containerWidth = 110;
-  int containerX = (SCREEN_W - containerWidth) / 2;
-  tft.fillRect(containerX + 5, 126, containerWidth - 10, 30, RGB565(248, 248, 250));
-  drawLightPassCircles();
+  
+  // Enhanced footer
+  tft.fillRoundRect(22, 145, 84, 13, 6, RGB565(240, 243, 248));
+  tft.setTextSize(1);
+  tft.setTextColor(TEXT_SECONDARY);
+  tft.setCursor(28, 148);
+  tft.print("Tap to select");
+  
+  // Corner decorations
+  drawSparkleEmoji(6, 145);
+  drawSparkleEmoji(116, 145);
 }
 
 // ======================================================
@@ -589,36 +763,39 @@ void handleButton() {
     delay(DEBOUNCE);
     lastPressTime = millis();
     
-    passIndex++;
+    if (currentState == LOCKED) {
+      passIndex++;
 
-    int circleSpacing = 24;
-    int totalWidth = (PASS_LENGTH - 1) * circleSpacing;
-    int startX = (SCREEN_W - totalWidth) / 2;
-    int circleX = startX + ((passIndex - 1) * circleSpacing);
-    int circleY = 138;
-    
-    for (int r = 6; r <= 12; r += 6) {
-      tft.drawCircle(circleX, circleY, r, RGB565(100, 220, 150));
-      delay(10);
-    }
-    
-    for (int size = 4; size <= 9; size += 3) {
-      tft.fillCircle(circleX, circleY, size, SUCCESS_GREEN);
-    }
-    
-    tft.fillCircle(circleX, circleY, 9, SUCCESS_GREEN);
-    tft.drawLine(circleX - 3, circleY, circleX - 1, circleY + 2, ST77XX_WHITE);
-    tft.drawLine(circleX - 1, circleY + 2, circleX + 3, circleY - 2, ST77XX_WHITE);
-    
-    if (passIndex >= PASS_LENGTH) {
-      currentState = UNLOCKING;
+      int circleSpacing = 26;
+      int totalWidth = (PASS_LENGTH - 1) * circleSpacing;
+      int startX = (SCREEN_W - totalWidth) / 2;
+      int circleX = startX + ((passIndex - 1) * circleSpacing);
+      int circleY = 140;
       
-      delay(50);  // Reduced from 80ms
-      animateSpectacularUnlock();
-      fastTransitionToMenu();
+      // Ripple effect
+      for (int r = 6; r <= 10; r += 4) {
+        tft.drawCircle(circleX, circleY, r, RGB565(120, 220, 150));
+        delay(8);
+      }
       
-      drawLightMainMenu();
-      currentState = MENU;
+      // Fill circle
+      tft.fillCircle(circleX, circleY, 8, SUCCESS_GREEN);
+      tft.drawLine(circleX - 3, circleY, circleX - 1, circleY + 2, CARD_BG);
+      tft.drawLine(circleX - 1, circleY + 2, circleX + 3, circleY - 2, CARD_BG);
+      
+      if (passIndex >= PASS_LENGTH) {
+        currentState = UNLOCKING;
+        
+        delay(50);
+        animateSpectacularUnlock();
+        fastTransitionToMenu();
+        
+        currentState = MENU;
+      }
+    } else if (currentState == MENU) {
+      // Cycle through menu items
+      selectedMenuItem = (selectedMenuItem + 1) % 4;
+      drawEnhancedMenu();
     }
   }
 
@@ -626,60 +803,84 @@ void handleButton() {
 }
 
 // ======================================================
-// LIGHT THEME MENU WITH OFFSET
+// EMOJI DRAWINGS
 // ======================================================
-void drawLightMainMenuAtOffset(int xOffset, int yOffset) {
-  tft.setTextSize(3);
-  tft.setTextColor(DARK_TEXT);
-  if (40 + xOffset >= 0 && 40 + xOffset < SCREEN_W) {
-    tft.setCursor(40 + xOffset, 15 + yOffset);
-    tft.print("MENU");
-  }
-  
-  if (20 + xOffset >= 0 && 38 + yOffset >= 0 && 38 + yOffset < SCREEN_H) {
-    int lineStart = max(0, 20 + xOffset);
-    int lineEnd = min(SCREEN_W, 108 + xOffset);
-    if (lineEnd > lineStart) {
-      tft.drawFastHLine(lineStart, 38 + yOffset, lineEnd - lineStart, BORDER_LIGHT);
-    }
-  }
 
-  tft.setTextSize(2);
+// Party Popper Emoji 🎉
+void drawPartyEmoji(int x, int y) {
+  // Cone
+  tft.fillTriangle(x + 4, y, x, y + 10, x + 8, y + 10, RGB565(255, 200, 100));
+  tft.drawTriangle(x + 4, y, x, y + 10, x + 8, y + 10, RGB565(220, 160, 80));
   
-  if (8 + xOffset >= -112 && 50 + yOffset >= 0 && 50 + yOffset < SCREEN_H) {
-    int rectX = max(0, 8 + xOffset);
-    int rectW = min(120 + xOffset, SCREEN_W) - rectX;
-    if (rectW > 0) {
-      tft.fillRoundRect(rectX, 50 + yOffset, rectW, 26, 8, ACCENT_BLUE);
-    }
-    
-    if (20 + xOffset >= 0 && 20 + xOffset < SCREEN_W) {
-      tft.setTextColor(ST77XX_WHITE);
-      tft.setCursor(20 + xOffset, 56 + yOffset);
-      tft.print("Settings");
-    }
-  }
-  
-  tft.setTextColor(DARK_TEXT);
-  if (20 + xOffset >= 0 && 20 + xOffset < SCREEN_W && 88 + yOffset >= 0 && 88 + yOffset < SCREEN_H) {
-    tft.setCursor(20 + xOffset, 88 + yOffset);
-    tft.print("Status");
-  }
-  
-  if (20 + xOffset >= 0 && 20 + xOffset < SCREEN_W && 118 + yOffset >= 0 && 118 + yOffset < SCREEN_H) {
-    tft.setCursor(20 + xOffset, 118 + yOffset);
-    tft.print("About");
-  }
-
-  tft.setTextSize(1);
-  tft.setTextColor(MID_GRAY);
-  if (30 + xOffset >= 0 && 30 + xOffset < SCREEN_W && 148 + yOffset >= 0 && 148 + yOffset < SCREEN_H) {
-    tft.setCursor(30 + xOffset, 148 + yOffset);
-    tft.print("Tap to select");
-  }
+  // Confetti particles
+  tft.fillRect(x - 2, y - 2, 2, 2, RGB565(255, 100, 150));
+  tft.fillRect(x + 10, y - 1, 2, 2, RGB565(100, 200, 255));
+  tft.fillRect(x + 2, y - 4, 2, 2, RGB565(150, 255, 100));
+  tft.fillRect(x + 8, y - 3, 2, 2, RGB565(255, 255, 100));
+  tft.drawPixel(x - 1, y + 2, RGB565(255, 150, 200));
+  tft.drawPixel(x + 11, y + 1, RGB565(200, 150, 255));
 }
 
-void drawLightMainMenu() {
-  tft.fillScreen(LIGHT_BG);
-  drawLightMainMenuAtOffset(0, 0);
+// Heart Emoji ❤️
+void drawHeartEmoji(int x, int y) {
+  // Left lobe
+  tft.fillCircle(x + 2, y + 2, 2, RGB565(255, 80, 120));
+  // Right lobe
+  tft.fillCircle(x + 6, y + 2, 2, RGB565(255, 80, 120));
+  // Bottom point
+  tft.fillTriangle(x, y + 3, x + 8, y + 3, x + 4, y + 8, RGB565(255, 80, 120));
+  
+  // Highlight
+  tft.drawPixel(x + 2, y + 1, RGB565(255, 180, 200));
+  tft.drawPixel(x + 6, y + 1, RGB565(255, 180, 200));
+}
+
+// Star Emoji ⭐
+void drawStarEmoji(int x, int y) {
+  // Star shape (simplified 5-point)
+  tft.fillTriangle(x + 4, y, x + 3, y + 3, x + 5, y + 3, RGB565(255, 220, 80));
+  tft.fillTriangle(x + 4, y + 8, x + 2, y + 4, x + 6, y + 4, RGB565(255, 220, 80));
+  tft.fillTriangle(x, y + 3, x + 3, y + 3, x + 2, y + 5, RGB565(255, 220, 80));
+  tft.fillTriangle(x + 8, y + 3, x + 5, y + 3, x + 6, y + 5, RGB565(255, 220, 80));
+  tft.fillRect(x + 3, y + 3, 3, 2, RGB565(255, 220, 80));
+  
+  // Highlight
+  tft.drawPixel(x + 4, y + 1, RGB565(255, 255, 200));
+}
+
+// Sparkle Emoji ✨
+void drawSparkleEmoji(int x, int y) {
+  // Main sparkle
+  tft.drawPixel(x + 4, y, RGB565(255, 255, 200));
+  tft.drawPixel(x + 3, y + 1, RGB565(255, 240, 150));
+  tft.drawPixel(x + 4, y + 1, RGB565(255, 255, 220));
+  tft.drawPixel(x + 5, y + 1, RGB565(255, 240, 150));
+  tft.drawPixel(x + 2, y + 2, RGB565(255, 240, 150));
+  tft.fillRect(x + 3, y + 2, 3, 1, RGB565(255, 255, 200));
+  tft.drawPixel(x + 6, y + 2, RGB565(255, 240, 150));
+  tft.drawPixel(x + 3, y + 3, RGB565(255, 240, 150));
+  tft.drawPixel(x + 4, y + 3, RGB565(255, 255, 220));
+  tft.drawPixel(x + 5, y + 3, RGB565(255, 240, 150));
+  tft.drawPixel(x + 4, y + 4, RGB565(255, 255, 200));
+  
+  // Small sparkles around
+  tft.drawPixel(x + 1, y + 1, RGB565(200, 220, 255));
+  tft.drawPixel(x + 7, y + 1, RGB565(200, 220, 255));
+  tft.drawPixel(x + 1, y + 5, RGB565(200, 220, 255));
+  tft.drawPixel(x + 7, y + 5, RGB565(200, 220, 255));
+}
+
+// Quote/Speech Bubble Emoji 💬
+void drawQuoteEmoji(int x, int y) {
+  // Main bubble
+  tft.fillRoundRect(x + 1, y + 1, 7, 5, 2, RGB565(180, 200, 255));
+  tft.drawRoundRect(x + 1, y + 1, 7, 5, 2, RGB565(120, 160, 220));
+  
+  // Tail
+  tft.fillTriangle(x + 2, y + 6, x + 3, y + 6, x + 1, y + 8, RGB565(180, 200, 255));
+  tft.drawLine(x + 2, y + 6, x + 1, y + 8, RGB565(120, 160, 220));
+  
+  // Quote marks inside
+  tft.drawPixel(x + 3, y + 3, RGB565(255, 255, 255));
+  tft.drawPixel(x + 5, y + 3, RGB565(255, 255, 255));
 }
