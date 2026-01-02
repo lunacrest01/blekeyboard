@@ -229,8 +229,8 @@ void drawPasscodeCircles() {
 // UNLOCK ANIMATION - Clean blink effect
 // ======================================================
 void showUnlockAnimation() {
-  // "UNLOCKED" text blinks 3 times with glow effect
-  for (int blink = 0; blink < 3; blink++) {
+  // "UNLOCKED" text blinks once, then displays final time
+  for (int blink = 0; blink < 1; blink++) {
     // Clear ENTIRE text region - very wide to catch all pixels
     tft.fillRect(10, 60, 108, 35, BG_COLOR);
     
