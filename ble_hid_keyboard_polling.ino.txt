@@ -9,8 +9,7 @@
 #define TFT_DC      3
 #define TFT_SCLK    6
 #define TFT_MOSI    7
-#define BUTTON_0    0  // Button that enters "0"
-#define BUTTON_1    1  // Button that enters "1"
+#define BUTTON_PIN  0
 
 #define SCREEN_W 128
 #define SCREEN_H 160
@@ -29,7 +28,6 @@
 #define ACCENT_PINK 0xFBDA      // Pink
 #define ACCENT_ORANGE 0xFC60    // Orange
 #define SUCCESS_GREEN 0x07E0    // Green
-#define ERROR_RED 0xF800        // Red
 #define CIRCLE_EMPTY 0xD69A     // Light gray
 
 Adafruit_ST7735 tft(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
@@ -38,16 +36,9 @@ Adafruit_ST7735 tft(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
 enum State { BOOTING, LOCKED, UNLOCKING, MENU };
 State currentState = BOOTING;
 
-// ================== PASSCODE ==================
-// CHANGE THIS TO SET YOUR PASSCODE
-// Example: {0,0,1,1} means press Button0, Button0, Button1, Button1
-const uint8_t CORRECT_PASSCODE[PASS_LENGTH] = {0, 0, 0, 0};
-uint8_t enteredPasscode[PASS_LENGTH] = {0, 0, 0, 0};
-
 uint8_t passIndex = 0;
 unsigned long lastPressTime = 0;
-bool lastButton0 = HIGH;
-bool lastButton1 = HIGH;
+bool lastButton = HIGH;
 uint8_t selectedMenuItem = 0;
 
 // ======================================================
@@ -57,7 +48,6 @@ void drawLockScreen();
 void drawLockIcon(int x, int y, bool unlocked);
 void drawPasscodeCircles();
 void showUnlockAnimation();
-void showLockedAnimation();
 void drawMenu();
 void drawLoveLetter(int x, int y);
 void drawLandscape(int x, int y);
@@ -65,20 +55,6 @@ void drawNote(int x, int y);
 void drawProfile(int x, int y);
 void drawParty(int x, int y);
 uint16_t RGB(uint8_t r, uint8_t g, uint8_t b);
-bool checkPasscode();
-void handleButtons();
-
-// ======================================================
-// PASSCODE CHECK
-// ======================================================
-bool checkPasscode() {
-  for (int i = 0; i < PASS_LENGTH; i++) {
-    if (enteredPasscode[i] != CORRECT_PASSCODE[i]) {
-      return false;
-    }
-  }
-  return true;
-}
 
 // ======================================================
 // SETUP
@@ -86,8 +62,7 @@ bool checkPasscode() {
 void setup() {
   SPI.begin();
   SPI.setFrequency(80000000);
-  pinMode(BUTTON_0, INPUT_PULLUP);
-  pinMode(BUTTON_1, INPUT_PULLUP);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
 
   tft.initR(INITR_BLACKTAB);
   tft.setRotation(0);
@@ -103,14 +78,10 @@ void setup() {
 // MAIN LOOP
 // ======================================================
 void loop() {
-  handleButtons();
+  handleButton();
 
   if (currentState == LOCKED && millis() - lastPressTime > TIMEOUT_MS && passIndex > 0) {
     passIndex = 0;
-    // Clear entered passcode
-    for (int i = 0; i < PASS_LENGTH; i++) {
-      enteredPasscode[i] = 0;
-    }
     drawPasscodeCircles();
   }
 }
@@ -166,7 +137,7 @@ void drawLockScreen() {
   
   // "Enter Passcode" label
   tft.setTextColor(TEXT_LIGHT);
-  tft.setCursor(23, 118);
+  tft.setCursor(28, 118);
   tft.print("Enter Passcode");
   
   // Passcode circles
@@ -230,54 +201,42 @@ void drawPasscodeCircles() {
   int startX = (SCREEN_W - (PASS_LENGTH - 1) * spacing) / 2;
   int circleY = 138;
   
-  // Clear area with gradient background
-  for (int y = 133; y < 151; y++) {
-    uint8_t shade = 235 - (y / 15);
-    tft.drawFastHLine(15, y, 98, RGB(shade, shade + 5, shade + 10));
-  }
+  // Clear area
+  tft.fillRect(15, 133, 98, 18, BG_COLOR);
 
   for (int i = 0; i < PASS_LENGTH; i++) {
     int x = startX + (i * spacing);
     
     if (i < passIndex) {
-      // Filled - show different colors for 0 vs 1
-      uint16_t fillColor;
-      if (enteredPasscode[i] == 0) {
-        fillColor = ACCENT_BLUE;  // Blue for "0"
-      } else {
-        fillColor = ACCENT_PURPLE;  // Purple for "1"
-      }
+      // Filled - green with checkmark
+      tft.fillCircle(x, circleY, 7, SUCCESS_GREEN);
+      tft.drawCircle(x, circleY, 7, SUCCESS_GREEN);
       
-      tft.fillCircle(x, circleY, 7, fillColor);
-      tft.drawCircle(x, circleY, 7, fillColor);
-      
-      // Show the digit
-      tft.setTextSize(1);
-      tft.setTextColor(CARD_BG);
-      tft.setCursor(x - 3, circleY - 4);
-      tft.print(enteredPasscode[i]);
+      // Checkmark
+      tft.drawLine(x - 3, circleY, x - 1, circleY + 2, CARD_BG);
+      tft.drawLine(x - 1, circleY + 2, x + 3, circleY - 2, CARD_BG);
       
     } else {
-      // Empty - just outline
+      // Empty - light gray outline
+      tft.fillCircle(x, circleY, 7, CARD_BG);
       tft.drawCircle(x, circleY, 7, CIRCLE_EMPTY);
-      tft.drawCircle(x, circleY, 6, CIRCLE_EMPTY);
       tft.fillCircle(x, circleY, 2, CIRCLE_EMPTY);
     }
   }
 }
 
 // ======================================================
-// UNLOCK ANIMATION - Blinks 2 times
+// UNLOCK ANIMATION - Clean blink effect
 // ======================================================
 void showUnlockAnimation() {
-  // "UNLOCKED" text blinks 2 times with glow effect
-  for (int blink = 0; blink < 2; blink++) {
-    // Clear text region
+  // "UNLOCKED" text blinks once, then displays final time
+  for (int blink = 0; blink < 1; blink++) {
+    // Clear ENTIRE text region - very wide to catch all pixels
     tft.fillRect(10, 60, 108, 35, BG_COLOR);
     
-    delay(30);
+    delay(30); // Ensure clear completes
     
-    // Redraw background gradient
+    // Redraw background gradient in cleared area
     for (int y = 60; y < 95; y++) {
       uint8_t shade = 235 - (y / 15);
       tft.drawFastHLine(10, y, 108, RGB(shade, shade + 5, shade + 10));
@@ -285,7 +244,7 @@ void showUnlockAnimation() {
     
     delay(20);
     
-    // Draw glow effect
+    // Draw glow effect (lighter green shadow)
     tft.setTextSize(2);
     tft.setTextColor(RGB(180, 255, 180));
     tft.setCursor(21, 69);
@@ -300,7 +259,7 @@ void showUnlockAnimation() {
     
     delay(350);
     
-    // Clear again
+    // Clear again - use fillRect for complete clearing
     tft.fillRect(10, 60, 108, 35, BG_COLOR);
     
     // Redraw gradient
@@ -312,7 +271,7 @@ void showUnlockAnimation() {
     delay(250);
   }
   
-  // Final display - stays visible
+  // Final clear and redraw
   tft.fillRect(10, 60, 108, 35, BG_COLOR);
   for (int y = 60; y < 95; y++) {
     uint8_t shade = 235 - (y / 15);
@@ -321,6 +280,7 @@ void showUnlockAnimation() {
   
   delay(20);
   
+  // Final "UNLOCKED" text stays visible with glow
   tft.setTextSize(2);
   tft.setTextColor(RGB(180, 255, 180));
   tft.setCursor(21, 69);
@@ -332,153 +292,59 @@ void showUnlockAnimation() {
   tft.setCursor(22, 70);
   tft.print("UNLOCKED");
   
-  delay(400);
+  delay(600);
 }
 
 // ======================================================
-// LOCKED ANIMATION - Blinks 2 times (for wrong password)
-// ======================================================
-void showLockedAnimation() {
-  // "LOCKED" text blinks 2 times with red glow
-  for (int blink = 0; blink < 2; blink++) {
-    // Clear text region
-    tft.fillRect(10, 60, 108, 35, BG_COLOR);
-    
-    delay(30);
-    
-    // Redraw background gradient
-    for (int y = 60; y < 95; y++) {
-      uint8_t shade = 235 - (y / 15);
-      tft.drawFastHLine(10, y, 108, RGB(shade, shade + 5, shade + 10));
-    }
-    
-    delay(20);
-    
-    // Draw glow effect - red
-    tft.setTextSize(2);
-    tft.setTextColor(RGB(255, 180, 180));
-    tft.setCursor(27, 69);
-    tft.print("LOCKED");
-    tft.setCursor(29, 71);
-    tft.print("LOCKED");
-    
-    // Main text - bright red
-    tft.setTextColor(ERROR_RED);
-    tft.setCursor(28, 70);
-    tft.print("LOCKED");
-    
-    delay(350);
-    
-    // Clear again
-    tft.fillRect(10, 60, 108, 35, BG_COLOR);
-    
-    // Redraw gradient
-    for (int y = 60; y < 95; y++) {
-      uint8_t shade = 235 - (y / 15);
-      tft.drawFastHLine(10, y, 108, RGB(shade, shade + 5, shade + 10));
-    }
-    
-    delay(250);
-  }
-  
-  // RESET passcode data BEFORE redrawing
-  passIndex = 0;
-  for (int i = 0; i < PASS_LENGTH; i++) {
-    enteredPasscode[i] = 0;
-  }
-  
-  // Now redraw lock screen with empty circles
-  drawLockScreen();
-}
-
-// ======================================================
-// MENU
+// MENU - Centered and clean
 // ======================================================
 void drawMenu() {
-  // Gradient background with subtle variation
+  // Clear screen with gradient
   for (int y = 0; y < SCREEN_H; y++) {
-    uint8_t shade = 245 - (y / 12);
-    tft.drawFastHLine(0, y, SCREEN_W, RGB(shade - 5, shade, shade + 8));
+    uint8_t shade = 240 - (y / 15);
+    tft.drawFastHLine(0, y, SCREEN_W, RGB(shade, shade + 3, shade + 6));
   }
   
-  // Title card with enhanced styling
-  int titleY = 10;
+  // Title card - centered
+  tft.fillRoundRect(25, 15, 78, 22, 11, CARD_BG);
+  tft.drawRoundRect(25, 15, 78, 22, 11, ACCENT_PURPLE);
   
-  // Shadow layer
-  tft.fillRoundRect(24, titleY + 3, 80, 30, 14, RGB(180, 185, 195));
-  
-  // Main card
-  tft.fillRoundRect(23, titleY, 80, 30, 14, CARD_BG);
-  
-  // Gradient border effect
-  for (int i = 0; i < 3; i++) {
-    tft.drawRoundRect(23 + i, titleY + i, 80 - (i*2), 30 - (i*2), 14 - i, ACCENT_PURPLE);
-  }
-  
-  // Title text with shadow
   tft.setTextSize(2);
-  tft.setTextColor(RGB(200, 190, 220));
-  tft.setCursor(42, 18);
-  tft.print("MENU");
-  
   tft.setTextColor(TEXT_DARK);
-  tft.setCursor(41, 17);
+  tft.setCursor(43, 21);
   tft.print("MENU");
   
-  // Modern divider with decorative dots
-  tft.fillCircle(15, 50, 2, ACCENT_PURPLE);
-  tft.fillCircle(113, 50, 2, ACCENT_PURPLE);
-  for (int i = 0; i < 2; i++) {
-    tft.drawFastHLine(20, 50 + i, 88, RGB(210, 215, 225));
-  }
+  // Divider
+  tft.drawFastHLine(15, 45, 98, SHADOW);
   
-  // Menu items with improved design
+  // Menu items - centered vertically
   const char* items[] = {"Hope Letter", "Memories", "Quote", "About"};
   uint16_t colors[] = {ACCENT_PURPLE, ACCENT_PINK, ACCENT_BLUE, ACCENT_ORANGE};
   
-  int startY = 62;
-  int itemHeight = 23;
+  int startY = 55;
+  int itemHeight = 22;
   int spacing = 4;
   
   for (int i = 0; i < 4; i++) {
     int y = startY + (i * (itemHeight + spacing));
     
-    // Layered shadow for depth
-    tft.fillRoundRect(13, y + 3, 102, itemHeight, 11, RGB(190, 195, 205));
-    tft.fillRoundRect(12, y + 2, 102, itemHeight, 11, SHADOW);
+    // Card shadow
+    tft.fillRoundRect(11, y + 2, 106, itemHeight, 10, SHADOW);
     
-    // Main card with gradient border
-    tft.fillRoundRect(11, y, 102, itemHeight, 11, CARD_BG);
+    // Card
+    tft.fillRoundRect(10, y, 106, itemHeight, 10, CARD_BG);
+    tft.drawRoundRect(10, y, 106, itemHeight, 10, colors[i]);
     
-    for (int b = 0; b < 2; b++) {
-      tft.drawRoundRect(11 + b, y + b, 102 - (b*2), itemHeight - (b*2), 11 - b, colors[i]);
-    }
-    
-    // Number badge with enhanced styling
-    int badgeX = 21;
-    int badgeY = y + 11;
-    
-    // Badge shadow
-    tft.fillCircle(badgeX + 1, badgeY + 1, 8, RGB(180, 185, 195));
-    
-    // Badge with gradient effect
-    tft.fillCircle(badgeX, badgeY, 9, colors[i]);
-    tft.fillCircle(badgeX, badgeY, 8, colors[i]);
-    
-    // Number text
+    // Number circle
+    tft.fillCircle(20, y + 11, 7, colors[i]);
     tft.setTextSize(1);
     tft.setTextColor(CARD_BG);
-    tft.setCursor(badgeX - 3, badgeY - 4);
+    tft.setCursor(17, y + 7);
     tft.print(i + 1);
     
-    // Emoji with subtle background
-    int emojiX = 37;
+    // Emoji
+    int emojiX = 32;
     int emojiY = y + 6;
-    
-    // Emoji background circle
-    tft.fillCircle(emojiX + 5, emojiY + 5, 9, RGB(248, 250, 252));
-    tft.drawCircle(emojiX + 5, emojiY + 5, 9, RGB(230, 235, 240));
-    
     switch(i) {
       case 0: drawLoveLetter(emojiX, emojiY); break;
       case 1: drawLandscape(emojiX, emojiY); break;
@@ -486,71 +352,45 @@ void drawMenu() {
       case 3: drawProfile(emojiX, emojiY); break;
     }
     
-    // Text with shadow effect
-    tft.setTextColor(RGB(200, 205, 215));
-    tft.setCursor(55, y + 8);
-    tft.print(items[i]);
-    
+    // Text
     tft.setTextColor(TEXT_DARK);
-    tft.setCursor(54, y + 7);
+    tft.setCursor(46, y + 7);
     tft.print(items[i]);
   }
-  
-  // Bottom info bar with icon
-  tft.fillRoundRect(18, 148, 92, 9, 4, RGB(230, 235, 245));
-  tft.setTextSize(1);
-  tft.setTextColor(TEXT_LIGHT);
-  tft.setCursor(25, 149);
-  tft.print("Press to cycle");
-  
-  // Decorative arrow
-  tft.fillTriangle(103, 150, 103, 154, 106, 152, ACCENT_BLUE);
 }
 
 // ======================================================
-// BUTTON HANDLER - BOTH BUTTONS REGISTER DIGITS
+// BUTTON HANDLER
 // ======================================================
-void handleButtons() {
-  bool currentButton0 = digitalRead(BUTTON_0);
-  bool currentButton1 = digitalRead(BUTTON_1);
+void handleButton() {
+  bool current = digitalRead(BUTTON_PIN);
 
-  // Handle Button 0 press (enters "0")
-  if (currentButton0 == LOW && lastButton0 == HIGH) {
+  if (current == LOW && lastButton == HIGH) {
     delay(DEBOUNCE);
     lastPressTime = millis();
     
-    if (currentState == LOCKED && passIndex < PASS_LENGTH) {
-      // Record "0"
-      enteredPasscode[passIndex] = 0;
+    if (currentState == LOCKED) {
       passIndex++;
       
-      // Visual feedback
+      // Quick ripple effect on the circle
       int spacing = 24;
       int startX = (SCREEN_W - (PASS_LENGTH - 1) * spacing) / 2;
       int x = startX + ((passIndex - 1) * spacing);
       int y = 138;
       
       for (int r = 7; r < 11; r += 2) {
-        tft.drawCircle(x, y, r, ACCENT_BLUE);
+        tft.drawCircle(x, y, r, SUCCESS_GREEN);
         delay(12);
       }
       
       drawPasscodeCircles();
       
-      // Check if all 4 digits entered
       if (passIndex >= PASS_LENGTH) {
-        delay(200);
-        
-        if (checkPasscode()) {
-          // Correct!
-          currentState = UNLOCKING;
-          showUnlockAnimation();
-          drawMenu();
-          currentState = MENU;
-        } else {
-          // Wrong!
-          showLockedAnimation();
-        }
+        currentState = UNLOCKING;
+        delay(150);
+        showUnlockAnimation();
+        drawMenu();
+        currentState = MENU;
       }
       
     } else if (currentState == MENU) {
@@ -558,53 +398,7 @@ void handleButtons() {
     }
   }
 
-  // Handle Button 1 press (enters "1")
-  if (currentButton1 == LOW && lastButton1 == HIGH) {
-    delay(DEBOUNCE);
-    lastPressTime = millis();
-    
-    if (currentState == LOCKED && passIndex < PASS_LENGTH) {
-      // Record "1"
-      enteredPasscode[passIndex] = 1;
-      passIndex++;
-      
-      // Visual feedback
-      int spacing = 24;
-      int startX = (SCREEN_W - (PASS_LENGTH - 1) * spacing) / 2;
-      int x = startX + ((passIndex - 1) * spacing);
-      int y = 138;
-      
-      for (int r = 7; r < 11; r += 2) {
-        tft.drawCircle(x, y, r, ACCENT_PURPLE);
-        delay(12);
-      }
-      
-      drawPasscodeCircles();
-      
-      // Check if all 4 digits entered
-      if (passIndex >= PASS_LENGTH) {
-        delay(200);
-        
-        if (checkPasscode()) {
-          // Correct!
-          currentState = UNLOCKING;
-          showUnlockAnimation();
-          drawMenu();
-          currentState = MENU;
-        } else {
-          // Wrong!
-          showLockedAnimation();
-        }
-      }
-      
-    } else if (currentState == MENU) {
-      // Can also use button 1 in menu if you want
-      selectedMenuItem = (selectedMenuItem + 1) % 4;
-    }
-  }
-
-  lastButton0 = currentButton0;
-  lastButton1 = currentButton1;
+  lastButton = current;
 }
 
 // ======================================================
