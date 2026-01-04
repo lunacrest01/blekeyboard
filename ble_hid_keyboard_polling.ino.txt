@@ -9,8 +9,10 @@
 #define TFT_DC      3
 #define TFT_SCLK    6
 #define TFT_MOSI    7
-#define BUTTON_0    0
-#define BUTTON_1    1
+#define BUTTON_0    0  // UP (Password: 0)
+#define BUTTON_1    1  // DOWN (Password: 1)
+#define BUTTON_SELECT 2  // SELECT/CONFIRM (Password: 2)
+#define BUTTON_BACK 5  // BACK button
 
 #define SCREEN_W 128
 #define SCREEN_H 160
@@ -35,7 +37,7 @@
 Adafruit_ST7735 tft(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
 
 // ================== STATE ==================
-enum State { BOOTING, LOCKED, UNLOCKING, MENU };
+enum State { BOOTING, LOCKED, UNLOCKING, MENU, CONTENT };
 State currentState = BOOTING;
 
 // ================== PASSCODE ==================
@@ -46,7 +48,11 @@ uint8_t passIndex = 0;
 unsigned long lastPressTime = 0;
 bool lastButton0 = HIGH;
 bool lastButton1 = HIGH;
+bool lastButtonSelect = HIGH;
+bool lastButtonBack = HIGH;
 uint8_t selectedMenuItem = 0;
+uint8_t currentPage = 0;
+uint8_t maxPages = 0;
 
 // ======================================================
 // FUNCTION DECLARATIONS
@@ -57,11 +63,18 @@ void drawPasscodeCircles();
 void showUnlockAnimation();
 void showLockedAnimation();
 void drawMenu();
+void drawMenuItem(int itemIndex, bool isSelected);
+void showContent(int contentIndex);
+void drawLetterContent(uint8_t page);
+void updatePageContent(int contentIndex);
+void drawMemoriesContent(uint8_t page);
+void drawQuoteContent(uint8_t page);
+void drawAboutContent(uint8_t page);
+void drawPageIndicator();
 void drawLoveLetter(int x, int y);
 void drawLandscape(int x, int y);
 void drawNote(int x, int y);
 void drawProfile(int x, int y);
-void drawParty(int x, int y);
 uint16_t RGB(uint8_t r, uint8_t g, uint8_t b);
 bool checkPasscode();
 void handleButtons();
@@ -86,6 +99,8 @@ void setup() {
   SPI.setFrequency(80000000);
   pinMode(BUTTON_0, INPUT_PULLUP);
   pinMode(BUTTON_1, INPUT_PULLUP);
+  pinMode(BUTTON_SELECT, INPUT_PULLUP);
+  pinMode(BUTTON_BACK, INPUT_PULLUP);
 
   tft.initR(INITR_BLACKTAB);
   tft.setRotation(0);
@@ -145,7 +160,7 @@ void drawLockScreen() {
   int cardY = 30;
   int cardH = 85;
   int cardW = 104;
-  int cardX = (SCREEN_W - cardW) / 2;  // Center horizontally
+  int cardX = (SCREEN_W - cardW) / 2;
   
   // Shadow
   tft.fillRoundRect(cardX + 2, cardY + 2, cardW, cardH, 15, SHADOW);
@@ -160,13 +175,13 @@ void drawLockScreen() {
   // "LOCKED" text - centered
   tft.setTextSize(1);
   tft.setTextColor(TEXT_DARK);
-  int lockedTextW = 6 * 6;  // 6 characters * 6 pixels wide
+  int lockedTextW = 6 * 6;
   tft.setCursor((SCREEN_W - lockedTextW) / 2, 95);
   tft.print("LOCKED");
   
   // "Enter Passcode" label - centered
   tft.setTextColor(TEXT_LIGHT);
-  int passcodeTextW = 14 * 6;  // 14 characters * 6 pixels wide
+  int passcodeTextW = 14 * 6;
   tft.setCursor((SCREEN_W - passcodeTextW) / 2, 118);
   tft.print("Enter Passcode");
   
@@ -179,7 +194,6 @@ void drawLockScreen() {
 // ======================================================
 void drawLockIcon(int x, int y, bool unlocked) {
   if (unlocked) {
-    // Unlocked - green with open shackle
     tft.fillRoundRect(x - 10, y - 2, 20, 24, 4, RGB(230, 255, 230));
     tft.drawRoundRect(x - 10, y - 2, 20, 24, 4, SUCCESS_GREEN);
     tft.drawRoundRect(x - 9, y - 1, 18, 22, 3, SUCCESS_GREEN);
@@ -194,7 +208,6 @@ void drawLockIcon(int x, int y, bool unlocked) {
     tft.drawFastVLine(x - 9, shackleY, 8, SUCCESS_GREEN);
     
   } else {
-    // Locked - blue with closed shackle
     tft.fillRoundRect(x - 10, y - 2, 20, 24, 4, RGB(240, 245, 255));
     tft.drawRoundRect(x - 10, y - 2, 20, 24, 4, ACCENT_BLUE);
     tft.drawRoundRect(x - 9, y - 1, 18, 22, 3, ACCENT_BLUE);
@@ -237,8 +250,12 @@ void drawPasscodeCircles() {
       uint16_t fillColor;
       if (enteredPasscode[i] == 0) {
         fillColor = ACCENT_BLUE;
-      } else {
+      } else if (enteredPasscode[i] == 1) {
         fillColor = ACCENT_PURPLE;
+      } else if (enteredPasscode[i] == 2) {
+        fillColor = ACCENT_PINK;
+      } else {
+        fillColor = ACCENT_ORANGE;
       }
       
       tft.fillCircle(x, circleY, 7, fillColor);
@@ -274,12 +291,6 @@ void showUnlockAnimation() {
     delay(20);
     
     tft.setTextSize(2);
-    tft.setTextColor(RGB(180, 255, 180));
-    tft.setCursor(21, 69);
-    tft.print("UNLOCKED");
-    tft.setCursor(23, 71);
-    tft.print("UNLOCKED");
-    
     tft.setTextColor(SUCCESS_GREEN);
     tft.setCursor(22, 70);
     tft.print("UNLOCKED");
@@ -305,12 +316,6 @@ void showUnlockAnimation() {
   delay(20);
   
   tft.setTextSize(2);
-  tft.setTextColor(RGB(180, 255, 180));
-  tft.setCursor(21, 69);
-  tft.print("UNLOCKED");
-  tft.setCursor(23, 71);
-  tft.print("UNLOCKED");
-  
   tft.setTextColor(SUCCESS_GREEN);
   tft.setCursor(22, 70);
   tft.print("UNLOCKED");
@@ -335,12 +340,6 @@ void showLockedAnimation() {
     delay(20);
     
     tft.setTextSize(2);
-    tft.setTextColor(RGB(255, 180, 180));
-    tft.setCursor(27, 69);
-    tft.print("LOCKED");
-    tft.setCursor(29, 71);
-    tft.print("LOCKED");
-    
     tft.setTextColor(ERROR_RED);
     tft.setCursor(28, 70);
     tft.print("LOCKED");
@@ -366,7 +365,7 @@ void showLockedAnimation() {
 }
 
 // ======================================================
-// MENU - COMPLETELY FIXED
+// MENU
 // ======================================================
 void drawMenu() {
   // Gradient background
@@ -385,10 +384,6 @@ void drawMenu() {
   }
   
   tft.setTextSize(2);
-  tft.setTextColor(RGB(200, 190, 220));
-  tft.setCursor(42, 16);
-  tft.print("MENU");
-  
   tft.setTextColor(TEXT_DARK);
   tft.setCursor(41, 15);
   tft.print("MENU");
@@ -400,71 +395,581 @@ void drawMenu() {
     tft.drawFastHLine(20, 45 + i, 88, RGB(210, 215, 225));
   }
   
-  // Menu items - ALL 4 ITEMS VISIBLE
+  // Draw all menu items
+  for (int i = 0; i < 4; i++) {
+    drawMenuItem(i, (i == selectedMenuItem));
+  }
+  
+  // Bottom hint with back button
+  tft.fillCircle(50, 152, 2, ACCENT_BLUE);
+  tft.fillCircle(54, 152, 2, ACCENT_PURPLE);
+  tft.fillCircle(58, 152, 2, ACCENT_PINK);
+}
+
+// ======================================================
+// REDRAW SINGLE MENU ITEM - NO BLUR
+// ======================================================
+void drawMenuItem(int itemIndex, bool isSelected) {
   const char* items[] = {"Hope Letter", "Memories", "Quote", "About"};
   uint16_t colors[] = {ACCENT_PURPLE, ACCENT_PINK, ACCENT_BLUE, ACCENT_ORANGE};
   
   int startY = 55;
   int itemHeight = 20;
   int spacing = 3;
+  int y = startY + (itemIndex * (itemHeight + spacing));
   
-  for (int i = 0; i < 4; i++) {
-    int y = startY + (i * (itemHeight + spacing));
-    
-    // Shadows
-    tft.fillRoundRect(13, y + 2, 102, itemHeight, 10, RGB(190, 195, 205));
-    tft.fillRoundRect(12, y + 1, 102, itemHeight, 10, SHADOW);
-    
-    // Main card - WIDER to fit text
+  // Shadows
+  tft.fillRoundRect(13, y + 2, 102, itemHeight, 10, RGB(190, 195, 205));
+  tft.fillRoundRect(12, y + 1, 102, itemHeight, 10, SHADOW);
+  
+  // Main card
+  if (isSelected) {
+    tft.fillRoundRect(11, y, 106, itemHeight, 10, colors[itemIndex]);
+    for (int b = 0; b < 3; b++) {
+      tft.drawRoundRect(11 + b, y + b, 106 - (b*2), itemHeight - (b*2), 10 - b, colors[itemIndex]);
+    }
+  } else {
     tft.fillRoundRect(11, y, 106, itemHeight, 10, CARD_BG);
-    
     for (int b = 0; b < 2; b++) {
-      tft.drawRoundRect(11 + b, y + b, 106 - (b*2), itemHeight - (b*2), 10 - b, colors[i]);
+      tft.drawRoundRect(11 + b, y + b, 106 - (b*2), itemHeight - (b*2), 10 - b, colors[itemIndex]);
     }
-    
-    // Number badge
-    int badgeX = 19;
-    int badgeY = y + 10;
-    
-    tft.fillCircle(badgeX + 1, badgeY + 1, 7, RGB(180, 185, 195));
-    tft.fillCircle(badgeX, badgeY, 8, colors[i]);
-    tft.fillCircle(badgeX, badgeY, 7, colors[i]);
-    
-    tft.setTextSize(1);
-    tft.setTextColor(CARD_BG);
-    tft.setCursor(badgeX - 3, badgeY - 4);
-    tft.print(i + 1);
-    
-    // Emoji with background circle - PROPERLY CENTERED
-    int emojiBaseX = 32;
-    int emojiBaseY = y + 4;
-    
-    // Background circle for emoji
-    tft.fillCircle(emojiBaseX + 6, emojiBaseY + 6, 8, RGB(248, 250, 252));
-    tft.drawCircle(emojiBaseX + 6, emojiBaseY + 6, 8, RGB(230, 235, 240));
-    
-    // Draw emoji centered in circle
-    switch(i) {
-      case 0: drawLoveLetter(emojiBaseX + 1, emojiBaseY + 1); break;
-      case 1: drawLandscape(emojiBaseX + 1, emojiBaseY + 2); break;
-      case 2: drawNote(emojiBaseX + 1, emojiBaseY + 1); break;
-      case 3: drawProfile(emojiBaseX + 1, emojiBaseY + 1); break;
-    }
-    
-    // Text - PROPERLY POSITIONED INSIDE CARD
-    tft.setTextColor(RGB(200, 205, 215));
-    tft.setCursor(49, y + 7);
-    tft.print(items[i]);
-    
-    tft.setTextColor(TEXT_DARK);
-    tft.setCursor(48, y + 6);
-    tft.print(items[i]);
   }
   
-  // Bottom decorative dots only (removed "Press to cycle" text)
-  tft.fillCircle(60, 152, 2, ACCENT_BLUE);
-  tft.fillCircle(64, 152, 2, ACCENT_PURPLE);
-  tft.fillCircle(68, 152, 2, ACCENT_PINK);
+  // Number badge
+  int badgeX = 19;
+  int badgeY = y + 10;
+  uint16_t badgeColor = isSelected ? CARD_BG : colors[itemIndex];
+  uint16_t badgeTextColor = isSelected ? colors[itemIndex] : CARD_BG;
+  
+  tft.fillCircle(badgeX + 1, badgeY + 1, 7, RGB(180, 185, 195));
+  tft.fillCircle(badgeX, badgeY, 8, badgeColor);
+  tft.fillCircle(badgeX, badgeY, 7, badgeColor);
+  
+  tft.setTextSize(1);
+  tft.setTextColor(badgeTextColor);
+  tft.setCursor(badgeX - 3, badgeY - 4);
+  tft.print(itemIndex + 1);
+  
+  // Emoji
+  int emojiBaseX = 32;
+  int emojiBaseY = y + 4;
+  
+  if (isSelected) {
+    tft.fillCircle(emojiBaseX + 6, emojiBaseY + 6, 8, RGB(255, 255, 255));
+    tft.drawCircle(emojiBaseX + 6, emojiBaseY + 6, 8, RGB(240, 245, 250));
+  } else {
+    tft.fillCircle(emojiBaseX + 6, emojiBaseY + 6, 8, RGB(248, 250, 252));
+    tft.drawCircle(emojiBaseX + 6, emojiBaseY + 6, 8, RGB(230, 235, 240));
+  }
+  
+  switch(itemIndex) {
+    case 0: drawLoveLetter(emojiBaseX + 1, emojiBaseY + 1); break;
+    case 1: drawLandscape(emojiBaseX + 1, emojiBaseY + 2); break;
+    case 2: drawNote(emojiBaseX + 1, emojiBaseY + 1); break;
+    case 3: drawProfile(emojiBaseX + 1, emojiBaseY + 1); break;
+  }
+  
+  // Text - SINGLE DRAW, NO SHADOW
+  tft.setTextSize(1);
+  if (isSelected) {
+    tft.setTextColor(CARD_BG);
+  } else {
+    tft.setTextColor(TEXT_DARK);
+  }
+  tft.setCursor(48, y + 6);
+  tft.print(items[itemIndex]);
+}
+
+// ======================================================
+// SHOW CONTENT SCREEN WITH PAGES
+// ======================================================
+void showContent(int contentIndex) {
+  const char* titles[] = {"Hope Letter", "Memories", "Quote", "About"};
+  uint16_t colors[] = {ACCENT_PURPLE, ACCENT_PINK, ACCENT_BLUE, ACCENT_ORANGE};
+  
+  // Set max pages based on content type
+  switch(contentIndex) {
+    case 0: maxPages = 6; break; // Hope Letter - 6 pages (more content!)
+    case 1: maxPages = 3; break; // Memories - 3 pages
+    case 2: maxPages = 2; break; // Quote - 2 pages
+    case 3: maxPages = 1; break; // About - 1 page
+  }
+  
+  currentPage = 0; // Reset to first page
+  
+  // Clear screen with gradient
+  for (int y = 0; y < SCREEN_H; y++) {
+    uint8_t shade = 245 - (y / 12);
+    tft.drawFastHLine(0, y, SCREEN_W, RGB(shade - 5, shade, shade + 8));
+  }
+  
+  // Title bar with shadow
+  tft.fillRoundRect(6, 7, 116, 22, 10, RGB(180, 185, 195));
+  tft.fillRoundRect(5, 5, 116, 22, 10, colors[contentIndex]);
+  
+  tft.setTextSize(1);
+  tft.setTextColor(CARD_BG);
+  int titleW = strlen(titles[contentIndex]) * 6;
+  tft.setCursor((SCREEN_W - titleW) / 2, 12);
+  tft.print(titles[contentIndex]);
+  
+  // Content area with shadow - LARGER
+  tft.fillRoundRect(7, 33, 114, 113, 10, RGB(200, 205, 215));
+  tft.fillRoundRect(5, 31, 114, 113, 10, CARD_BG);
+  tft.drawRoundRect(5, 31, 114, 113, 10, colors[contentIndex]);
+  
+  // Draw content based on selection and page
+  switch(contentIndex) {
+    case 0: drawLetterContent(currentPage); break;
+    case 1: drawMemoriesContent(currentPage); break;
+    case 2: drawQuoteContent(currentPage); break;
+    case 3: drawAboutContent(currentPage); break;
+  }
+  
+  // Page indicator
+  drawPageIndicator();
+  
+  // Navigation hint
+  tft.fillRoundRect(10, 150, 108, 9, 4, RGB(230, 235, 245));
+  tft.setTextSize(1);
+  tft.setTextColor(TEXT_LIGHT);
+  if (maxPages > 1) {
+    tft.setCursor(14, 151);
+    tft.print("UP/DN Page  BACK Menu");
+  } else {
+    tft.setCursor(30, 151);
+    tft.print("BACK to Menu");
+  }
+}
+
+// ======================================================
+// UPDATE PAGE CONTENT WITH ANIMATION
+// ======================================================
+void updatePageContent(int contentIndex) {
+  // Slide animation - fade out
+  for (int alpha = 0; alpha < 3; alpha++) {
+    tft.fillRect(10, 36, 108, 103, RGB(245, 247, 250));
+    delay(15);
+  }
+  
+  // Update content area
+  tft.fillRect(6, 32, 112, 111, CARD_BG);
+  
+  uint16_t colors[] = {ACCENT_PURPLE, ACCENT_PINK, ACCENT_BLUE, ACCENT_ORANGE};
+  tft.drawRoundRect(5, 31, 114, 113, 10, colors[contentIndex]);
+  
+  // Draw new content
+  switch(contentIndex) {
+    case 0: drawLetterContent(currentPage); break;
+    case 1: drawMemoriesContent(currentPage); break;
+    case 2: drawQuoteContent(currentPage); break;
+    case 3: drawAboutContent(currentPage); break;
+  }
+  
+  // Update page indicator
+  drawPageIndicator();
+  
+  // Quick fade in
+  delay(20);
+}
+
+// ======================================================
+// DRAW PAGE INDICATOR
+// ======================================================
+void drawPageIndicator() {
+  if (maxPages <= 1) return;
+  
+  int dotSize = 4;
+  int spacing = 9;
+  int totalWidth = (maxPages * dotSize) + ((maxPages - 1) * spacing);
+  int startX = (SCREEN_W - totalWidth) / 2;
+  int dotY = 148;
+  
+  for (int i = 0; i < maxPages; i++) {
+    int x = startX + (i * (dotSize + spacing)) + (dotSize / 2);
+    
+    if (i == currentPage) {
+      tft.fillCircle(x, dotY, dotSize, ACCENT_PURPLE);
+      tft.drawCircle(x, dotY, dotSize + 1, ACCENT_PURPLE);
+    } else {
+      tft.drawCircle(x, dotY, 2, CIRCLE_EMPTY);
+      tft.fillCircle(x, dotY, 1, CIRCLE_EMPTY);
+    }
+  }
+}
+
+// ======================================================
+// HOPE LETTER CONTENT - 6 PAGES WITH MORE CONTENT
+// ======================================================
+void drawLetterContent(uint8_t page) {
+  tft.setTextSize(1);
+  tft.setTextColor(TEXT_DARK);
+  
+  int leftMargin = 10;
+  int rightMargin = 110;
+  int topMargin = 36;
+  int lineHeight = 9;
+  
+  switch(page) {
+    case 0: // Page 1 - Opening
+      tft.setTextColor(ACCENT_PURPLE);
+      tft.setCursor(leftMargin, topMargin);
+      tft.print("Dear [Name],");
+      
+      tft.setTextColor(TEXT_DARK);
+      tft.setCursor(leftMargin, topMargin + lineHeight * 2);
+      tft.print("I wanted to take a");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 3);
+      tft.print("moment to write you");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 4);
+      tft.print("this special letter.");
+      
+      tft.setCursor(leftMargin, topMargin + lineHeight * 6);
+      tft.print("Words sometimes feel");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 7);
+      tft.print("inadequate to express");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 8);
+      tft.print("what's in my heart,");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 9);
+      tft.print("but I'll try my best");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 10);
+      tft.print("to convey how much");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 11);
+      tft.print("you truly mean to me.");
+      break;
+      
+    case 1: // Page 2 - Appreciation
+      tft.setCursor(leftMargin, topMargin);
+      tft.print("Every single moment");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 1);
+      tft.print("we've shared together");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 2);
+      tft.print("has been a precious");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 3);
+      tft.print("gift in my life.");
+      
+      tft.setCursor(leftMargin, topMargin + lineHeight * 5);
+      tft.print("You have this amazing");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 6);
+      tft.print("ability to light up");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 7);
+      tft.print("even the darkest days");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 8);
+      tft.print("with your presence,");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 9);
+      tft.print("your smile, and your");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 10);
+      tft.print("kindness that never");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 11);
+      tft.print("fails to warm hearts.");
+      break;
+      
+    case 2: // Page 3 - Your Qualities
+      tft.setTextColor(ACCENT_PURPLE);
+      tft.setCursor(leftMargin, topMargin);
+      tft.print("What I Admire:");
+      
+      tft.setTextColor(TEXT_DARK);
+      tft.setCursor(leftMargin, topMargin + lineHeight * 2);
+      tft.print("Your strength in the");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 3);
+      tft.print("face of challenges");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 4);
+      tft.print("inspires me daily.");
+      
+      tft.setCursor(leftMargin, topMargin + lineHeight * 6);
+      tft.print("Your compassion for");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 7);
+      tft.print("others shows the true");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 8);
+      tft.print("beauty of your soul.");
+      
+      tft.setCursor(leftMargin, topMargin + lineHeight * 10);
+      tft.print("Your determination to");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 11);
+      tft.print("grow makes me proud.");
+      break;
+      
+    case 3: // Page 4 - Support & Encouragement
+      tft.setCursor(leftMargin, topMargin);
+      tft.print("I want you to know");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 1);
+      tft.print("that no matter what");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 2);
+      tft.print("life throws your way,");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 3);
+      tft.print("you never walk alone.");
+      
+      tft.setCursor(leftMargin, topMargin + lineHeight * 5);
+      tft.print("When doubts creep in,");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 6);
+      tft.print("remember: you are so");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 7);
+      tft.print("much stronger than you");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 8);
+      tft.print("think, braver than you");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 9);
+      tft.print("believe, and more");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 10);
+      tft.print("capable than you can");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 11);
+      tft.print("ever imagine.");
+      break;
+      
+    case 4: // Page 5 - Promises & Future
+      tft.setTextColor(ACCENT_PURPLE);
+      tft.setCursor(leftMargin, topMargin);
+      tft.print("My Promise to You:");
+      
+      tft.setTextColor(TEXT_DARK);
+      tft.setCursor(leftMargin, topMargin + lineHeight * 2);
+      tft.print("I promise to always");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 3);
+      tft.print("believe in you, even");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 4);
+      tft.print("when you don't believe");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 5);
+      tft.print("in yourself.");
+      
+      tft.setCursor(leftMargin, topMargin + lineHeight * 7);
+      tft.print("I promise to celebrate");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 8);
+      tft.print("your victories and");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 9);
+      tft.print("stand by you during");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 10);
+      tft.print("difficult times with");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 11);
+      tft.print("unwavering support.");
+      break;
+      
+    case 5: // Page 6 - Closing
+      tft.setCursor(leftMargin, topMargin);
+      tft.print("Keep shining your");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 1);
+      tft.print("beautiful light into");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 2);
+      tft.print("this world. Never");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 3);
+      tft.print("forget how special,");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 4);
+      tft.print("unique, and amazing");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 5);
+      tft.print("you truly are.");
+      
+      tft.setCursor(leftMargin, topMargin + lineHeight * 7);
+      tft.print("This little device");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 8);
+      tft.print("holds my thoughts and");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 9);
+      tft.print("wishes for you always.");
+      
+      tft.setTextColor(ACCENT_PURPLE);
+      tft.setCursor(leftMargin, topMargin + lineHeight * 11);
+      tft.print("With endless love,");
+      
+      // Draw decorative hearts
+      int heartY = topMargin + lineHeight * 10;
+      tft.fillCircle(leftMargin + 50, heartY, 2, RGB(255, 150, 180));
+      tft.fillCircle(leftMargin + 54, heartY, 2, RGB(255, 150, 180));
+      tft.fillTriangle(leftMargin + 48, heartY + 1, 
+                       leftMargin + 56, heartY + 1, 
+                       leftMargin + 52, heartY + 5, RGB(255, 150, 180));
+      
+      tft.fillCircle(leftMargin + 60, heartY, 2, RGB(255, 150, 180));
+      tft.fillCircle(leftMargin + 64, heartY, 2, RGB(255, 150, 180));
+      tft.fillTriangle(leftMargin + 58, heartY + 1, 
+                       leftMargin + 66, heartY + 1, 
+                       leftMargin + 62, heartY + 5, RGB(255, 150, 180));
+      break;
+  }
+}
+
+// ======================================================
+// MEMORIES CONTENT - MULTIPLE PAGES
+// ======================================================
+void drawMemoriesContent(uint8_t page) {
+  tft.setTextSize(1);
+  tft.setTextColor(TEXT_DARK);
+  
+  int leftMargin = 10;
+  int topMargin = 36;
+  int lineHeight = 9;
+  
+  switch(page) {
+    case 0: // Page 1
+      tft.setTextColor(ACCENT_PINK);
+      tft.setCursor(leftMargin, topMargin);
+      tft.print("Memory #1:");
+      
+      tft.setTextColor(TEXT_DARK);
+      tft.setCursor(leftMargin, topMargin + lineHeight * 2);
+      tft.print("Remember that perfect");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 3);
+      tft.print("day we walked in the");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 4);
+      tft.print("park together?");
+      
+      tft.setCursor(leftMargin, topMargin + lineHeight * 6);
+      tft.print("The sun was setting,");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 7);
+      tft.print("painting the sky with");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 8);
+      tft.print("beautiful shades of");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 9);
+      tft.print("orange and pink. That");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 10);
+      tft.print("moment felt like pure");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 11);
+      tft.print("magic to me.");
+      break;
+      
+    case 1: // Page 2
+      tft.setTextColor(ACCENT_PINK);
+      tft.setCursor(leftMargin, topMargin);
+      tft.print("Memory #2:");
+      
+      tft.setTextColor(TEXT_DARK);
+      tft.setCursor(leftMargin, topMargin + lineHeight * 2);
+      tft.print("That unexpected rain");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 3);
+      tft.print("shower that caught us");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 4);
+      tft.print("off guard! We ran for");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 5);
+      tft.print("cover, laughing until");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 6);
+      tft.print("our sides hurt.");
+      
+      tft.setCursor(leftMargin, topMargin + lineHeight * 8);
+      tft.print("Those spontaneous,");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 9);
+      tft.print("unplanned moments are");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 10);
+      tft.print("the ones that create");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 11);
+      tft.print("the best memories.");
+      break;
+      
+    case 2: // Page 3
+      tft.setTextColor(ACCENT_PINK);
+      tft.setCursor(leftMargin, topMargin);
+      tft.print("Memory #3:");
+      
+      tft.setTextColor(TEXT_DARK);
+      tft.setCursor(leftMargin, topMargin + lineHeight * 2);
+      tft.print("Every coffee we've");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 3);
+      tft.print("shared, every late");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 4);
+      tft.print("night conversation,");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 5);
+      tft.print("every comfortable");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 6);
+      tft.print("silence between us...");
+      
+      tft.setCursor(leftMargin, topMargin + lineHeight * 8);
+      tft.print("These quiet treasures");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 9);
+      tft.print("are forever kept safe");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 10);
+      tft.print("in the special place");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 11);
+      tft.print("I keep just for you.");
+      break;
+  }
+}
+
+// ======================================================
+// QUOTE CONTENT - MULTIPLE PAGES
+// ======================================================
+void drawQuoteContent(uint8_t page) {
+  tft.setTextSize(1);
+  int leftMargin = 12;
+  int topMargin = 42;
+  int lineHeight = 10;
+  
+  switch(page) {
+    case 0: // Page 1
+      tft.setTextColor(ACCENT_BLUE);
+      tft.setCursor(leftMargin, topMargin);
+      tft.print("Quote of Hope:");
+      
+      tft.setTextColor(TEXT_DARK);
+      tft.setCursor(leftMargin, topMargin + lineHeight * 2);
+      tft.print("\"The best way to");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 3);
+      tft.print("predict the future");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 4);
+      tft.print("is to create it.\"");
+      
+      tft.setTextColor(TEXT_LIGHT);
+      tft.setCursor(leftMargin + 20, topMargin + lineHeight * 6);
+      tft.print("- Peter Drucker");
+      
+      tft.setTextColor(TEXT_DARK);
+      tft.setCursor(leftMargin, topMargin + lineHeight * 8);
+      tft.print("Never stop dreaming");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 9);
+      tft.print("and believing!");
+      break;
+      
+    case 1: // Page 2
+      tft.setTextColor(ACCENT_BLUE);
+      tft.setCursor(leftMargin, topMargin);
+      tft.print("Daily Reminder:");
+      
+      tft.setTextColor(TEXT_DARK);
+      tft.setCursor(leftMargin, topMargin + lineHeight * 2);
+      tft.print("You are stronger");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 3);
+      tft.print("than you think.");
+      
+      tft.setCursor(leftMargin, topMargin + lineHeight * 5);
+      tft.print("You are capable of");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 6);
+      tft.print("amazing things.");
+      
+      tft.setCursor(leftMargin, topMargin + lineHeight * 8);
+      tft.print("Believe in yourself");
+      tft.setCursor(leftMargin, topMargin + lineHeight * 9);
+      tft.print("always!");
+      break;
+  }
+}
+
+// ======================================================
+// ABOUT CONTENT - SINGLE PAGE
+// ======================================================
+void drawAboutContent(uint8_t page) {
+  tft.setTextSize(1);
+  tft.setTextColor(TEXT_DARK);
+  
+  int leftMargin = 12;
+  int topMargin = 42;
+  int lineHeight = 10;
+  
+  tft.setCursor(leftMargin, topMargin);
+  tft.print("Hope Box Device");
+  
+  tft.setCursor(leftMargin, topMargin + lineHeight * 2);
+  tft.print("Created with love");
+  tft.setCursor(leftMargin, topMargin + lineHeight * 3);
+  tft.print("and care for you.");
+  
+  tft.setCursor(leftMargin, topMargin + lineHeight * 5);
+  tft.print("Version 2.0");
+  
+  tft.setTextColor(TEXT_LIGHT);
+  tft.setCursor(leftMargin, topMargin + lineHeight * 7);
+  tft.print("Hardware:");
+  tft.setTextColor(TEXT_DARK);
+  tft.setCursor(leftMargin, topMargin + lineHeight * 8);
+  tft.print("ESP32 + ST7735");
+  
+  tft.setTextColor(ACCENT_ORANGE);
+  tft.setCursor(leftMargin + 20, topMargin + lineHeight * 10);
+  tft.print("Made by [You]");
 }
 
 // ======================================================
@@ -473,85 +978,210 @@ void drawMenu() {
 void handleButtons() {
   bool currentButton0 = digitalRead(BUTTON_0);
   bool currentButton1 = digitalRead(BUTTON_1);
+  bool currentButtonSelect = digitalRead(BUTTON_SELECT);
+  bool currentButtonBack = digitalRead(BUTTON_BACK);
 
+  // Button 0 - UP (Password value: 0)
   if (currentButton0 == LOW && lastButton0 == HIGH) {
     delay(DEBOUNCE);
-    lastPressTime = millis();
+    currentButton0 = digitalRead(BUTTON_0);
     
-    if (currentState == LOCKED && passIndex < PASS_LENGTH) {
-      enteredPasscode[passIndex] = 0;
-      passIndex++;
+    if (currentButton0 == LOW) {
+      lastPressTime = millis();
       
-      int spacing = 24;
-      int startX = (SCREEN_W - (PASS_LENGTH - 1) * spacing) / 2;
-      int x = startX + ((passIndex - 1) * spacing);
-      int y = 138;
-      
-      for (int r = 7; r < 11; r += 2) {
-        tft.drawCircle(x, y, r, ACCENT_BLUE);
-        delay(12);
-      }
-      
-      drawPasscodeCircles();
-      
-      if (passIndex >= PASS_LENGTH) {
-        delay(200);
+      if (currentState == LOCKED && passIndex < PASS_LENGTH) {
+        enteredPasscode[passIndex] = 0;
+        passIndex++;
         
-        if (checkPasscode()) {
-          currentState = UNLOCKING;
-          showUnlockAnimation();
-          drawMenu();
-          currentState = MENU;
-        } else {
-          showLockedAnimation();
+        int spacing = 24;
+        int startX = (SCREEN_W - (PASS_LENGTH - 1) * spacing) / 2;
+        int x = startX + ((passIndex - 1) * spacing);
+        int y = 138;
+        
+        for (int r = 7; r < 11; r += 2) {
+          tft.drawCircle(x, y, r, ACCENT_BLUE);
+          delay(12);
+        }
+        
+        drawPasscodeCircles();
+        
+        if (passIndex >= PASS_LENGTH) {
+          delay(200);
+          
+          if (checkPasscode()) {
+            currentState = UNLOCKING;
+            showUnlockAnimation();
+            drawMenu();
+            currentState = MENU;
+          } else {
+            showLockedAnimation();
+          }
+        }
+        
+      } else if (currentState == MENU) {
+        uint8_t oldSelection = selectedMenuItem;
+        selectedMenuItem = (selectedMenuItem == 0) ? 3 : selectedMenuItem - 1;
+        
+        drawMenuItem(oldSelection, false);
+        drawMenuItem(selectedMenuItem, true);
+        
+      } else if (currentState == CONTENT) {
+        // Previous page
+        if (currentPage > 0) {
+          currentPage--;
+          updatePageContent(selectedMenuItem);
         }
       }
-      
-    } else if (currentState == MENU) {
-      selectedMenuItem = (selectedMenuItem + 1) % 4;
     }
   }
 
+  // Button 1 - DOWN (Password value: 1)
   if (currentButton1 == LOW && lastButton1 == HIGH) {
     delay(DEBOUNCE);
-    lastPressTime = millis();
+    currentButton1 = digitalRead(BUTTON_1);
     
-    if (currentState == LOCKED && passIndex < PASS_LENGTH) {
-      enteredPasscode[passIndex] = 1;
-      passIndex++;
+    if (currentButton1 == LOW) {
+      lastPressTime = millis();
       
-      int spacing = 24;
-      int startX = (SCREEN_W - (PASS_LENGTH - 1) * spacing) / 2;
-      int x = startX + ((passIndex - 1) * spacing);
-      int y = 138;
-      
-      for (int r = 7; r < 11; r += 2) {
-        tft.drawCircle(x, y, r, ACCENT_PURPLE);
-        delay(12);
-      }
-      
-      drawPasscodeCircles();
-      
-      if (passIndex >= PASS_LENGTH) {
-        delay(200);
+      if (currentState == LOCKED && passIndex < PASS_LENGTH) {
+        enteredPasscode[passIndex] = 1;
+        passIndex++;
         
-        if (checkPasscode()) {
-          currentState = UNLOCKING;
-          showUnlockAnimation();
-          drawMenu();
-          currentState = MENU;
-        } else {
-          showLockedAnimation();
+        int spacing = 24;
+        int startX = (SCREEN_W - (PASS_LENGTH - 1) * spacing) / 2;
+        int x = startX + ((passIndex - 1) * spacing);
+        int y = 138;
+        
+        for (int r = 7; r < 11; r += 2) {
+          tft.drawCircle(x, y, r, ACCENT_PURPLE);
+          delay(12);
+        }
+        
+        drawPasscodeCircles();
+        
+        if (passIndex >= PASS_LENGTH) {
+          delay(200);
+          
+          if (checkPasscode()) {
+            currentState = UNLOCKING;
+            showUnlockAnimation();
+            drawMenu();
+            currentState = MENU;
+          } else {
+            showLockedAnimation();
+          }
+        }
+        
+      } else if (currentState == MENU) {
+        uint8_t oldSelection = selectedMenuItem;
+        selectedMenuItem = (selectedMenuItem + 1) % 4;
+        
+        drawMenuItem(oldSelection, false);
+        drawMenuItem(selectedMenuItem, true);
+        
+      } else if (currentState == CONTENT) {
+        // Next page
+        if (currentPage < maxPages - 1) {
+          currentPage++;
+          updatePageContent(selectedMenuItem);
         }
       }
+    }
+  }
+
+  // Button SELECT - CONFIRM (Password value: 2)
+  if (currentButtonSelect == LOW && lastButtonSelect == HIGH) {
+    delay(DEBOUNCE);
+    currentButtonSelect = digitalRead(BUTTON_SELECT);
+    
+    if (currentButtonSelect == LOW) {
+      lastPressTime = millis();
       
-    } else if (currentState == MENU) {
-      selectedMenuItem = (selectedMenuItem + 1) % 4;
+      if (currentState == LOCKED && passIndex < PASS_LENGTH) {
+        enteredPasscode[passIndex] = 2;
+        passIndex++;
+        
+        int spacing = 24;
+        int startX = (SCREEN_W - (PASS_LENGTH - 1) * spacing) / 2;
+        int x = startX + ((passIndex - 1) * spacing);
+        int y = 138;
+        
+        for (int r = 7; r < 11; r += 2) {
+          tft.drawCircle(x, y, r, ACCENT_PINK);
+          delay(12);
+        }
+        
+        drawPasscodeCircles();
+        
+        if (passIndex >= PASS_LENGTH) {
+          delay(200);
+          
+          if (checkPasscode()) {
+            currentState = UNLOCKING;
+            showUnlockAnimation();
+            drawMenu();
+            currentState = MENU;
+          } else {
+            showLockedAnimation();
+          }
+        }
+        
+      } else if (currentState == MENU) {
+        showContent(selectedMenuItem);
+        currentState = CONTENT;
+      }
+    }
+  }
+
+  // Button BACK - GPIO 5 (Password value: 3 OR Back button)
+  if (currentButtonBack == LOW && lastButtonBack == HIGH) {
+    delay(DEBOUNCE);
+    currentButtonBack = digitalRead(BUTTON_BACK);
+    
+    if (currentButtonBack == LOW) {
+      lastPressTime = millis();
+      
+      if (currentState == LOCKED && passIndex < PASS_LENGTH) {
+        enteredPasscode[passIndex] = 3;
+        passIndex++;
+        
+        int spacing = 24;
+        int startX = (SCREEN_W - (PASS_LENGTH - 1) * spacing) / 2;
+        int x = startX + ((passIndex - 1) * spacing);
+        int y = 138;
+        
+        for (int r = 7; r < 11; r += 2) {
+          tft.drawCircle(x, y, r, ACCENT_ORANGE);
+          delay(12);
+        }
+        
+        drawPasscodeCircles();
+        
+        if (passIndex >= PASS_LENGTH) {
+          delay(200);
+          
+          if (checkPasscode()) {
+            currentState = UNLOCKING;
+            showUnlockAnimation();
+            drawMenu();
+            currentState = MENU;
+          } else {
+            showLockedAnimation();
+          }
+        }
+        
+      } else if (currentState == CONTENT) {
+        // Go back to menu from content
+        drawMenu();
+        currentState = MENU;
+      }
     }
   }
 
   lastButton0 = currentButton0;
   lastButton1 = currentButton1;
+  lastButtonSelect = currentButtonSelect;
+  lastButtonBack = currentButtonBack;
 }
 
 // ======================================================
@@ -589,15 +1219,4 @@ void drawProfile(int x, int y) {
   tft.fillCircle(x + 5, y + 2, 3, RGB(100, 120, 140));
   tft.fillCircle(x + 5, y + 8, 4, RGB(100, 120, 140));
   tft.fillRect(x + 1, y + 8, 8, 2, RGB(240, 245, 255));
-}
-
-void drawParty(int x, int y) {
-  tft.fillTriangle(x + 5, y, x + 1, y + 10, x + 9, y + 10, RGB(255, 200, 100));
-  tft.drawTriangle(x + 5, y, x + 1, y + 10, x + 9, y + 10, RGB(220, 160, 80));
-  tft.fillRect(x - 1, y - 2, 2, 2, RGB(255, 100, 150));
-  tft.fillRect(x + 11, y - 1, 2, 2, RGB(100, 200, 255));
-  tft.fillRect(x + 3, y - 4, 2, 2, RGB(150, 255, 100));
-  tft.fillRect(x + 9, y - 3, 2, 2, RGB(255, 255, 100));
-  tft.drawPixel(x, y + 2, RGB(255, 150, 200));
-  tft.drawPixel(x + 12, y + 1, RGB(200, 150, 255));
 }
